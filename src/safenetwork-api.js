@@ -10,6 +10,10 @@
 [ ] re-organise APIs: App/FS and Web/WebServices (as two npm modules)
 [ ] move the 'safenetworkjs and safenetwork-web' notes to README.md of both modules
   [ ] maybe I can merge these and just have a build script for the web version? (get working separately first I think)
+[ ] to handle different SAFE auth/response in same module:
+  [ ] move safe-cli-boilerplate bootstrap() into safenetworkjs
+  [ ] write an equivalent for use in web
+  [ ] modify my SafenetworkApi authorise methods to select between the two
 */
 
 /*
@@ -70,12 +74,36 @@ Features generic JSON i/f for:
 
  */
 
+// TODO: when browser API matches this, add a built of safenetworkjs for web
+let safeApi
+if (window) {
+  safeApi = window.safeApp
+  const err = 'WARNING: safenetworkjs not built with support for browser yet'
+  console.log(err)
+  throw new Error(err)
+} else {
+  let safeApi = require('./bootstrap')
+}
+
  // Decorated console output
  const debug = require('debug')
  const logApi = require('debug')('safe:web')  // Web API
  const logLdp = require('debug')('safe:ldp')  // LDP service
  const logRest = require('debug')('safe:rest')  // REST request/response
  const logTest = require('debug')('safe:test')  // Test output
+
+ let extraDebug = false
+
+ const SN_TAGTYPE_SERVICES = 15001 // TODO get these from the API CONSTANTS
+ const SN_TAGTYPE_WWW = 15002
+ const SN_SERVICEID_WWW = 'www'
+
+ // TODO SN_TAGTYPE_LDP is set to SN_TAGTYPE_WWW so that browser fetch() works, and
+ // TODO apps using window.webFetch() will work as expected w/o this library,
+ // TODO unless or until Peruse can fetch() an LDP service tagtype (of 80655 = timbl's dob).
+ const SN_TAGTYPE_LDP = SN_TAGTYPE_WWW
+ const SN_SERVICEID_LDP = 'www'  // First try 'www' to test compat with other apps (eg Web Hosting Manager)
+                                 // TODO then try out 'ldp'
 
  // Libs
  const safeUtils = require('./safenetwork-utils')
@@ -147,11 +175,6 @@ Features generic JSON i/f for:
   *
   */
 
- NOTE: Keep app level support for services here because any app might
- want to create or interrogate services.
- But RESTful stuff and anything specifically for the browser should
- live in safenetwork-web
-
  class SafenetworkApi {
    constructor () {
      logApi('SafenetworkApi()')
@@ -216,10 +239,9 @@ Features generic JSON i/f for:
    //
    // @param a DOM API SAFEAppHandle, see window.safeApp.initialise()
    //
+
+   // TODO rework for new web API when released
    setSafeApi (appHandle) {
-     if (this._appHandle) {
-       window.safeApp.free(this._appHandle)
-     }
      this.initialise()             // Clears active services (so DOM API handles will be discarded)
      this._appHandle = appHandle   // SAFE API application handle
    }
@@ -257,7 +279,7 @@ Features generic JSON i/f for:
 
      let tmpAppHandle
      try {
-       tmpAppHandle = await window.safeApp.initialise(appConfig, (newState) => {
+       tmpAppHandle = await safeApi.initializeApp(appConfig, (newState) => {
            // Callback for network state changes
          logApi('SafeNetwork state changed to: ', newState)
          this._isConnected = newState // TODO bugchase
@@ -267,10 +289,14 @@ Features generic JSON i/f for:
        this.setSafeApi(tmpAppHandle)
        this._safeAppConfig = appConfig
        this._safeAppPermissions = undefined
-
-       await window.safeApp.connect(tmpAppHandle)
-       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+       if (window) {
+         await window.safeApp.connect(tmpAppHandle)
+         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+       } else {
+         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+       }
        return this._appHandle
      } catch (err) {
        logApi('WARNING: ', err)
@@ -307,7 +333,7 @@ Features generic JSON i/f for:
 
      let tmpAppHandle
      try {
-       tmpAppHandle = await window.safeApp.initialise(appConfig, (newState) => {
+       tmpAppHandle = await safeApi.initialize(appConfig, (newState) => {
            // Callback for network state changes
          logApi('SafeNetwork state changed to: ', newState)
          this._isConnected = newState // TODO bugchase
@@ -320,7 +346,10 @@ Features generic JSON i/f for:
        this._safeAppPermissions = (appPermissions !== undefined ? appPermissions : defaultPerms)
 
        // await this.testsNoAuth();  // TODO remove (for test only)
-       this._safeAuthUri = await window.safeApp.authorise(tmpAppHandle, this._safeAppPermissions, this._safeAppConfig.options)
+       this._safeAuthUri = this.safeApp().auth.genAthUri( this._safeAppPermissions, this._safeAppConfig.options)
+       await this.safeApp().auth.openUri(this._safeAuthUri)
+       ???
+       this._safeAuthUri = await safeApi.authorise(tmpAppHandle, this._safeAppPermissions, this._safeAppConfig.options)
        logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 
        await window.safeApp.connectAuthorised(tmpAppHandle, this._safeAuthUri)
@@ -358,7 +387,7 @@ Features generic JSON i/f for:
    //
    // @returns a Promise which resolves to a ValueVersion
    async getMutableDataValue (mdHandle, key) {
-     logApi('getMutableDataValue(%s,%s,%s)...', mdHandle, key, isEncrypted)
+     logApi('getMutableDataValue(%s,%s)...', mdHandle, key)
      let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
      try {
        let valueVersion = await window.safeMutableData.get(mdHandle, useKey)

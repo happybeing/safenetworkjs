@@ -5,5 +5,5 @@ const SafenetworkApi = require('./safenetwork-api')
 const SafenetworkFs = require('./safenetwork-fs')
 
 exports = module.exports = SafenetworkApi
-module.exports.SafenetworkApi = SafenetworkApi
-module.exports.SafenetworkFs = SafenetworkFs
+module.exports.SafenetworkApi = new SafenetworkApi
+//module.exports.SafenetworkFs = new SafenetworkFs
