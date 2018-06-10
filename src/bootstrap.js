@@ -30,11 +30,29 @@ const ipc = require('node-ipc')
 const path = require('path')
 const Safe = require('@maidsafe/safe-node-app')
 
+/* console to file
+// process.__defineGetter__('stderr', function () { return fs.createWriteStream(path.join(__dirname, '/pid-' + process.pid + '-error.log'), {flags: 'a'}) })
+// process.__defineGetter__('stdout', function () { return fs.createWriteStream(path.join(__dirname, '/pid-' + process.pid + '-console.log'), {flags: 'a'}) })
+
+// var fs = require('fs')
+var util = require('util')
+var logFile = fs.createWriteStream(path.join('/home/mrh/src/fuse/safenetwork-fuse/pid-' + process.pid + '-console.log'), {flags: 'w'})
+var logStdout = process.stdout
+
+console.log = function (d) {
+  logFile.write(util.format(d) + '\n')
+  logStdout.write(util.format(d) + '\n')
+}
+*/
+
 // No stdout from node-ipc
-ipc.config.silent = true
+// ipc.config.silent = true
 
 Safe.bootstrap = async (appInfo, permissions, argv) => {
-  console.log('\nSafe.bootstrap() with appInfo: ' + JSON.stringify(appInfo))
+  console.log('__dirname: ' + String(__dirname))
+  console.log('\nSafe.bootstrap()\n  with appInfo: ' + JSON.stringify(appInfo) +
+    '  argv: ' + JSON.stringify(argv))
+
   const options = {
     libPath: getLibPath()
   }
@@ -44,6 +62,7 @@ Safe.bootstrap = async (appInfo, permissions, argv) => {
       throw Error('--uri undefined')
     }
 
+    console.log('ipcSend(' + argv.pid + ',' + argv.uri + ')')
     await ipcSend(String(argv.pid), argv.uri)
 
     process.exit()
@@ -54,6 +73,7 @@ Safe.bootstrap = async (appInfo, permissions, argv) => {
     uri = argv.uri
   } else {
     await authorise(process.pid, appInfo, permissions, options)
+    console.log('ipcReceive(' + process.pid + ')')
     uri = await ipcReceive(String(process.pid))
   }
 
@@ -73,6 +93,7 @@ async function authorise (pid, appInfo, permissions, options) {
   const app = await Safe.initializeApp(appInfo, permissions, options)
   const uri = await app.auth.genAuthUri({})
 
+  console.log('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo))
   await app.auth.openUri(uri.uri)
 }
 
