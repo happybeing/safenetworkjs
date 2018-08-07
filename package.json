@@ -13,6 +13,7 @@
   "dependencies": {
     "@maidsafe/safe-node-app": "^0.8.1",
     "node-ipc": "^9.1.1",
+    "path": "^0.12.7",
     "string": "^3.3.3"
   },
   "bugs": {

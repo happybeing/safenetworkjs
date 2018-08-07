@@ -2,8 +2,10 @@
  * Local helpers
  */
 
-const isFolder = function (path) {
-  return path.substr(-1) === '/'
+const path = require('path')  // Cross platform itemPath handling
+
+const isFolder = function (itemPath) {
+  return itemPath.substr(-1) === path.sep
 }
 
 // Strip fragment for URI (removes everything from first '#')
@@ -17,8 +19,8 @@ const docpart = function (uri) {
   }
 }
 
-// Return full document path from root (strips host and fragment)
-const pathpart = function (uri) {
+// Return full document itemPath from root (strips host and fragment)
+const itemPathpart = function (uri) {
   let hostlen = hostpart(uri).length
   uri = uri.slice(protocol(uri).length)
   if (uri.indexOf('://') === 0) {
@@ -46,8 +48,8 @@ const protocol = function (uri) {
   }
 }
 
-const parentPath = function (path) {
-  return path.replace(/[^\/]+\/?$/, '')
+const parentPath = function (itemPath) {
+  return path.dirname(itemPath)
 }
 
 // Used to cache file info
@@ -141,22 +143,22 @@ function addLinks (headers, fileMetadata) {
   * @return {string}
   */
 function getFullUri (req) {
-  return getBaseUri(req) + url.resolve(req.baseUrl, req.path)
+  return getBaseUri(req) + url.resolve(req.baseUrl, req.itemPath)
 }
 
-function pathBasename (fullpath) {
+function itemPathBasename (fullitemPath) {
   var bname = ''
-  if (fullpath) {
-    bname = (fullpath.lastIndexOf('/') === fullpath.length - 1)
+  if (fullitemPath) {
+    bname = (fullitemPath.lastIndexOf('/') === fullitemPath.length - 1)
      ? ''
-     : path.basename(fullpath)
+     : itemPath.basename(fullitemPath)
   }
   return bname
 }
 
-function hasSuffix (path, suffixes) {
+function hasSuffix (itemPath, suffixes) {
   for (var i in suffixes) {
-    if (path.indexOf(suffixes[i], path.length - suffixes[i].length) !== -1) {
+    if (itemPath.indexOf(suffixes[i], itemPath.length - suffixes[i].length) !== -1) {
       return true
     }
   }
@@ -175,16 +177,16 @@ function getBaseUri (req) {
 /*
  * npm modules
  */
-const path = module.exports.path = require('path')
 const S = module.exports.string = require('string')
 const url = module.exports.url = require('url')
 
+module.exports.path = path
 /*
  * Local helpers
  */
 module.exports.isFolder = isFolder
 module.exports.docpart = docpart
-module.exports.pathpart = pathpart
+module.exports.itemPathpart = itemPathpart
 module.exports.hostpart = hostpart
 module.exports.protocol = protocol
 module.exports.parentPath = parentPath
@@ -196,7 +198,7 @@ module.exports.addLink = addLink
 module.exports.addLinks = addLinks
 
 module.exports.getFullUri = getFullUri
-module.exports.pathBasename = pathBasename
+module.exports.itemPathBasename = itemPathBasename
 module.exports.hasSuffix = hasSuffix
 module.exports.filenameToBaseUri = filenameToBaseUri
 module.exports.getBaseUri = getBaseUri

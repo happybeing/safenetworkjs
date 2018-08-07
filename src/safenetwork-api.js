@@ -1,6 +1,7 @@
 /* TODO theWebalyst:
-[ ] npm link for development of safenetwork-fuse
-[ ] get simple auth working so safenetwork-fuse auths with mock
+[/] npm link for development of safenetwork-fuse
+[x] get simple auth working so safenetwork-fuse auths with mock
+  -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setApp()
 [ ] migrate features from safenetwork-webapi to:
 [ ] SAFE Application API (safenetwork-api.js this file!)
 [ ] SAFE FS API (safenetwork-fs.js)
@@ -77,9 +78,9 @@ Features generic JSON i/f for:
 // TODO: when browser API matches this, add a build of safenetworkjs for web
 let safeApi
 if (typeof window !== 'undefined') {  // Browser SAFE DOM API
-  safeApi = window.safeApp // TODO this from bootstrap and make bootstrap do the test on window
+  safeApi = this.safeApi // TODO this from bootstrap and make bootstrap do the test on window
   const err = 'WARNING: safenetworkjs not built with support for browser yet'
-  console.log(err)
+  debug(err)
   throw new Error(err)
 } else {                              // SAFE App NodeJS API
   safeApi = require('./bootstrap')
@@ -87,21 +88,24 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
 
 // Decorated console output
 const debug = require('debug')
-const logApi = require('debug')('safe:web')  // Web API
-const logLdp = require('debug')('safe:ldp')  // LDP service
-const logRest = require('debug')('safe:rest')  // REST request/response
-const logTest = require('debug')('safe:test')  // Test output
+const logApi = require('debug')('safenetworkjs:web')  // Web API
+const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
+const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
+const logTest = require('debug')('safenetworkjs:test')  // Test output
 
 let extraDebug = false
 
-const SN_TAGTYPE_SERVICES = 15001 // TODO get these from the API CONSTANTS
-const SN_TAGTYPE_WWW = 15002
+// TODO get these from the API safeApi.CONSTANTS (see web_hosting_manager/app/safenet_comm/api.js for examples)
+// See https://github.com/maidsafe/safe_app_nodejs/blob/9b3a263cade8315370422400561088495d3ec5d9/src/consts.js#L85-L95
+const SN_TAGTYPE_SERVICES = 15001
+const SN_TAGTYPE_WWW = 15002  // Must be used for all MD referenced by _public, _documents etc (see https://forum.safedev.org/t/changes-to-tag-type-for-md-containers-referenced-in-public-documents-etc/1906?u=happybeing)
+const SN_TAGTYPE_NFS = SN_TAGTYPE_WWW
 const SN_SERVICEID_WWW = 'www'
 
 // TODO SN_TAGTYPE_LDP is set to SN_TAGTYPE_WWW so that browser fetch() works, and
 // TODO apps using window.webFetch() will work as expected w/o this library,
 // TODO unless or until Peruse can fetch() an LDP service tagtype (of 80655 = timbl's dob).
-const SN_TAGTYPE_LDP = SN_TAGTYPE_WWW
+const SN_TAGTYPE_LDP = SN_TAGTYPE_WWW // Same tag type needed for all file containers (in _public etc), therefore best to make NFS rather than WWW?
 const SN_SERVICEID_LDP = 'www'  // First try 'www' to test compat with other apps (eg Web Hosting Manager)
 // TODO then try out 'ldp'
 
@@ -187,7 +191,16 @@ class SafenetworkApi {
     // Make SAFE API (DOM or NodeJS available as this.safeApi)
     this.safeApi = safeApi
     if (safeApi.bootstrap !== undefined) {
-      this.bootstrap = safeApi.bootstrap // bootstrap is for auth from node and CLI
+      // bootstrap is for auth from node and CLI
+      this.bootstrap = (appConfig, appPermissions, argv) => {
+        return safeApi.bootstrap(appConfig, appPermissions, argv).then((safeApp) => {
+          this.setSafeApi(safeApp)
+          this._safeAppConfig = appConfig
+          this._safeAppPermissions = appPermissions
+          this._safeAuthUri = ''  // TODO refactor to get this from safeApi.bootstrap()
+          return safeApp
+        })
+      }
     }
     this._availableServices = new Map() // Map of installed services
     this.initialise()
@@ -209,6 +222,10 @@ class SafenetworkApi {
     this._isConnected = false
     this._isAuthorised = false
     this._authOnAccessDenied = false  // Used by simpleAuthorise() and fetch()
+
+    // Cached API Objects
+    this._containers = {} // Active RootContainer objects
+    this._folders = {}    // Active NfsContainer objects
 
     // Application specific configuration required for authorisation
     this._safeAppConfig = {}
@@ -248,14 +265,31 @@ class SafenetworkApi {
   // If application does its own safeApp.initialise, it must call setSafeApi()
   // Application can call this again if it wants to clear/refresh DOM API handles
   //
-  // @param a DOM API SAFEAppHandle, see window.safeApp.initialise()
+  // @param a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
 
   // TODO rework for new web API when released
   setSafeApi (appHandle) {
     this.initialise()             // Clears active services (so DOM API handles will be discarded)
     this._appHandle = appHandle   // SAFE API application handle
+
+    // SAFE API Interfaces
+    this.safeApp = this._appHandle
+    this.auth = this._appHandle.auth
+    this.crypto = this._appHandle.crypto
+    this.cypherOpt = this._appHandle.cypterOpt
+    this.immutableData = this._appHandle.immutableData
+    this.mutableData = this._appHandle.mutableData
+    this.webFetch = this._appHandle.webFetch
   }
+
+  // For access to SAFE API:
+  appHandle () { return this._appHandle }
+  getAuthUri () { return this._safeAuthUri } // TODO ensure auth URI comes from bootstrap
+  isConnected () { return this._isConnected }
+  isAuthorised () { return this._isAuthorised }
+  services () { return this._availableServices }  // Note: these are ServiceInterface rather than ServiceContainer
+
 
   // Read only connection with SAFE network (can authorise later)
   //
@@ -269,9 +303,9 @@ class SafenetworkApi {
   //   with a valid SAFEAppHandle
   //
   // @param [optional] appConfig - information for auth UI, if ommitted generic
-  //                - see DOM API window.safeApp.initialise()
+  //                - see DOM API this.safeApi.initialise()
   //
-  // @returns a DOM API SAFEAppHandle, see window.safeApp.initialise()
+  // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
   async initReadOnly (appConfig = untrustedAppConfig) {
     logApi('%s.initReadOnly(%O)...', this.constructor.name, appConfig)
@@ -301,7 +335,7 @@ class SafenetworkApi {
       this._safeAppConfig = appConfig
       this._safeAppPermissions = undefined
       if (window) {
-        await window.safeApp.connect(tmpAppHandle)
+        await this.safeApi.connect(tmpAppHandle)
         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
       } else {
@@ -327,10 +361,10 @@ class SafenetworkApi {
   // - if using this method you don't need to do anything with the returned SAFEAppHandle
   // - if authorising using another method, you MUST call SafenetworkApi.setApi() with a valid SAFEAppHandle
   //
-  // @param appConfig      - information for auth UI - see DOM API window.safeApp.initialise()
-  // @param appPermissions - (optional) requested permissions - see DOM API window.safeApp.authorise()
+  // @param appConfig      - information for auth UI - see DOM API this.safeApi.initialise()
+  // @param appPermissions - (optional) requested permissions - see DOM API this.safeApi.authorise()
   //
-  // @returns a DOM API SAFEAppHandle, see window.safeApp.initialise()
+  // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
   async simpleAuthorise (appConfig, appPermissions) {
     logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appPermissions)
@@ -363,7 +397,7 @@ class SafenetworkApi {
       this._safeAuthUri = await safeApi.authorise(tmpAppHandle, this._safeAppPermissions, this._safeAppConfig.options)
       logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 
-      await window.safeApp.connectAuthorised(tmpAppHandle, this._safeAuthUri)
+      await this.safeApi.connectAuthorised(tmpAppHandle, this._safeAuthUri)
       logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
       await this.testsAfterAuth()  // TODO remove (for test only)
       this._isAuthorised = true
@@ -375,12 +409,82 @@ class SafenetworkApi {
     }
   }
 
-  // For access to SAFE API:
-  appHandle () { return this._appHandle }
-  safeAuthUri () { return this._safeAuthUri }
-  isConnected () { return this._isConnected }
-  isAuthorised () { return this._isAuthorised }
-  services () { return this._availableServices }
+  /* --------------------------
+   * Simplified SAFE Containers
+   * --------------------------
+   *
+   * Several classes are provided to allow simpler programming of
+   * the standard containers for common operations.
+   *
+   * These include (not all implememented yet):
+   *  PublicContainer for _public
+   *  PrivateContainer for _documents, _music etc
+   *  PublicNamesContainer for _publicNames
+   *
+   * In addition to the root containers, ServicesContainer simplifies
+   * creation and management of SAFE services Mutable Data (but not yet
+   * implemented). Note that there is a separate ServicesInterface class
+   * which allows an application to access custom SAFE services with
+   * a web style interface (e.g. RESTful using fetch()).
+   */
+
+  /**
+   * Get an initialised root container instance
+   * @param  {String} containerName Name of a root container (e.g. '_public')
+   * @return {Object}               initialised instance of RootContainer
+   */
+
+  async getRootContainer (containerName) {
+    let container = this._rootContainers[containerName]
+    if (!container) {
+      containerClass = containerClasses[containerName]
+      if (containerClass) {
+        container = new containerClass(this, containerName)
+        container.intitialise().then( (result) => {
+          this._rootContainers[containerName] = container
+        })
+      }
+    }
+
+    return container
+  }
+
+  /**
+   * Get an initialised ServicesContainer instance for the publicName
+   * @param  {String} publicName
+   * @param  {boolean}  createNew access (false) or create (true) services MutableData
+   * @return {Object}            initialised instance of ServicesContainer
+   */
+  async getServicesContainer (publicName, createNew) {
+    let container = this._servicesContainers[publicName]
+    if (!container) {
+      container = new ServicesContainer(this, publicName)
+      container.intitialise(createNew).then(() => {
+        this._servicesContainers[publicName] = container
+      })
+    }
+
+    return container
+  }
+
+  /**
+   * Get an initialised NfsContainer instance
+   * @param {String} nameOrKey  Either the path (starting with a public container) or the XOR address
+   * @param  {boolean}  createNew access (false) or create (true) NFS MutableData
+   * @param {Object} parent (optional) typically a RootContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
+   * @return {Object}               initialised instance of NfsContainer
+   */
+  async getNfsContainer (nameOrKey, createNew, parent) {
+    let container = this._nfsContainers[nameOrKey]
+    if (!container) {
+      container = new NfsContainer(this, nameOrKey, parent)
+      container.intitialise(createNew).then(() => {
+        this._nfsContainers[nameOrKey] = container
+      })
+    }
+
+    return container
+  }
 
   /* --------------------------
   * Simplified MutableData API
@@ -399,10 +503,10 @@ class SafenetworkApi {
   // @returns a Promise which resolves to a ValueVersion
   async getMutableDataValue (mdHandle, key) {
     logApi('getMutableDataValue(%s,%s)...', mdHandle, key)
-    let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
+    let useKey = await this.mutableData.encryptKey(mdHandle, key)
     try {
-      let valueVersion = await window.safeMutableData.get(mdHandle, useKey)
-      valueVersion.buf = window.safeMutableData.decrypt(mdHandle, valueVersion.buf)
+      let valueVersion = await this.mutableData.get(mdHandle, useKey)
+      valueVersion.buf = this.mutableData.decrypt(mdHandle, valueVersion.buf)
       return valueVersion
     } catch (err) {
       logApi("getMutableDataValue() WARNING no entry found for key '%s'", key)
@@ -435,26 +539,26 @@ class SafenetworkApi {
     try {
       // Check for an existing entry
       try {
-        let encryptedKey = await window.safeMutableData.encryptKey(mdHandle, key)
-        entry = await window.safeMutableData.get(mdHandle, encryptedKey)
+        let encryptedKey = await this.mutableData.encryptKey(mdHandle, key)
+        entry = await this.mutableData.get(mdHandle, encryptedKey)
       } catch (err) {}
 
       if (entry && mustNotExist) {
         throw new Error("Key '" + key + "' already exists")
       }
 
-      let mutationHandle = await window.safeMutableData.newMutation(this.appHandle())
+      let mutationHandle = await this.mutableData.newMutation(this.safeApp)
 
       // Note: these only encrypt if the MD is private
-      let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
-      let useValue = await window.safeMutableData.encryptValue(mdHandle, value)
+      let useKey = await this.mutableData.encryptKey(mdHandle, key)
+      let useValue = await this.mutableData.encryptValue(mdHandle, value)
       if (entry) {
-        await window.safeMutableDataMutation.update(mutationHandle, useKey, useValue.version + 1)
+        await this.mutableDataMutation.update(mutationHandle, useKey, useValue.version + 1)
       } else {
-        await window.safeMutableDataMutation.insert(mutationHandle, useKey, useValue)
+        await this.mutableDataMutation.insert(mutationHandle, useKey, useValue)
       }
 
-      await window.safeMutableData.applyEntriesMutation(mdHandle, mutationHandle)
+      await this.mutableData.applyEntriesMutation(mdHandle, mutationHandle)
       logApi('Mutable Data Entry %s', (mustNotExist ? 'inserted' : 'updated'))
       return true
     } catch (err) {
@@ -485,12 +589,12 @@ class SafenetworkApi {
     try {
       // TODO wrap access to some MDs (eg for _publicNames container) in a getter that is passed permissions
       // TODO checks those permissions, gets the MD, and caches the value, or returns it immediately if not null
-      let publicNamesMd = await window.safeApp.getContainer(this.appHandle(), '_publicNames')
-      let entriesHandle = await window.safeMutableData.getEntries(publicNamesMd)
+      let publicNamesMd = await this.safeApi.getContainer(this.safeApp, '_publicNames')
+      let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
       let entryKey = this.makePublicNamesEntryKey(publicName)
-      let encryptedKey = await window.safeMutableData.encryptKey(publicNamesMd, entryKey)
-      let valueVersion = await window.safeMutableDataEntries.get(entriesHandle, encryptedKey)
-      valueVersion.buf = await window.safeMutableData.decrypt(publicNamesMd, valueVersion.buf)
+      let encryptedKey = await this.mutableData.encryptKey(publicNamesMd, entryKey)
+      let valueVersion = await this.mutableDataEntries.get(entriesHandle, encryptedKey)
+      valueVersion.buf = await this.mutableData.decrypt(publicNamesMd, valueVersion.buf)
       return {
         key: entryKey,
         valueVersion: valueVersion
@@ -543,7 +647,6 @@ class SafenetworkApi {
       if (hostProfile !== undefined && hostProfile !== '') { host = hostProfile + '.' + publicName }
 
       createResult.serviceValue = await service.setupServiceForHost(host, createResult.servicesMd)
-      window.safeMutableData.free(servicesMd)
     } catch (err) {
       throw new Error('Failed to create public name with service - Error: ' + err)
     }
@@ -577,66 +680,74 @@ class SafenetworkApi {
       let createResult = await this._createPublicName(publicName)
       let servicesMd = await createResult.servicesMd
       delete createResult.servicesMd
-      window.safeMutableData.free(servicesMd)
     } catch (err) {
       logApi('Unable to create public name \'' + publicName + '\': ', err)
       throw err
     }
   }
 
-  // Create a new random public container for
+  // Create a new random MutableData for NFS storage, inserts into a root container MD if specified
   //
-  // @param rootContainer a top level public container (e.g. '_public', '_documents' etc)
-  // @param publicName    the public name which owns the container
-  // @param containerName an arbitrary name which may be specified by the user, such as 'root-photos'
-  // @param mdTagType     Mutable Data tag_type (typically, this will be the service tag_type)
+  // @param {String} rootContainer an empty string, or name of a top level public container (e.g. '_public', '_documents' etc)
+  // @param {String} publicName    the public name which owns the container (or '' if none)
+  // @param {String} containerName an arbitrary name which may be specified by the user, such as 'root-photos'
+  // @param {Number} mdTagType     tag_type for new Mutable Data (currently can only be SN_TAGTYPE_WWW)
+  // @param {Boolean} isPrivate    (optional) defaults to false
   //
-  // @returns   Promise<NameAndTag>: the name and tag values
-  async createPublicContainer (rootContainer, publicName, containerName, mdTagType) {
-    logApi('createPublicContainer(%s,%s,%s,%s)...', rootContainer, publicName, containerName, mdTagType)
+  // @returns   Promise<NameAndTag>: the name and tag values of the newly created MD
+  async createNfsContainerMd (rootContainer, publicName, containerName, mdTagType, isPrivate) {
+    logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', rootContainer, publicName, containerName, mdTagType, isPrivate)
     try {
-      // Check the container does not yet exist
-      let rootMd = await window.safeApp.getContainer(this.appHandle(), rootContainer)
-      let rootKey = rootContainer + '/' + publicName + '/' + containerName
+      let ownerPart = ( publicName !== '' ? '/' + publicName : '' ) // Usually a folder is associated with a service on a public name
 
-      // Check the public container doesn't already exist
-      let existingValue = null
-      try {
-        existingValue = await this.getMutableDataValue(rootMd, rootKey)
-      } catch (err) {
-      } // Ok, key doesn't exist yet
-      if (existingValue) {
-        throw new Error("root container '" + rootContainer + "' already has entry with key: '" + rootKey + "'")
+      let rootMd
+      if (rootContainer !== '') {
+        // Check the container does not yet exist
+        rootMd = await this.auth.getContainer(this.safeApp, rootContainer)
+        let rootKey = rootContainer + '/' + ownerPart + '/' + containerName
+
+        // Check the public container doesn't already exist
+        let existingValue = null
+        try {
+          existingValue = await this.getMutableDataValue(rootMd, rootKey)
+        } catch (err) {
+        } // Ok, key doesn't exist yet
+        if (existingValue) {
+          throw new Error("root container '" + rootContainer + "' already has entry with key: '" + rootKey + "'")
+        }
       }
 
       // Create the new container
-      let mdHandle = await window.safeMutableData.newRandomPublic(this.appHandle(), mdTagType)
-      let entriesHandle = await window.safeMutableData.newEntries(this.appHandle())
+      let mdHandle = await this.mutableData.newRandomPublic(this.safeApp, mdTagType)
+      let entriesHandle = await this.mutableData.newEntries(this.safeApp)
       // TODO review this with Web Hosting Manager (where it creates a new root-www container)
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
       let pmSet = ['Read', 'Update', 'Insert', 'Delete', 'ManagePermissions']
-      let pubKey = await window.safeCrypto.getAppPubSignKey(this.appHandle())
-      let pmHandle = await window.safeMutableData.newPermissions(this.appHandle())
-      await window.safeMutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
-      await window.safeMutableData.put(mdHandle, pmHandle, entriesHandle)
-      let nameAndTag = await window.safeMutableData.getNameAndTag(mdHandle)
+      let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
+      let pmHandle = await this.mutableData.newPermissions(this.safeApp)
+      await this.mutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
+      await this.mutableData.put(mdHandle, pmHandle, entriesHandle)
+      let nameAndTag = await this.mutableData.getNameAndTag(mdHandle)
 
       // TODO BUG subfolder: try with 'posts/rand/', to chase bug in _getFolder() where we have a subfolder
       /*
       logLdp('DEBUG testing newly created service container, mdHandle: %s', mdHandle)
       let randText = 'posts/' + Date.now()
       logLdp('DEBUG try insert a random filename', randText)
-      let nfsHandle = await window.safeMutableData.emulateAs(mdHandle,'NFS')
+      let nfsHandle = await this.mutableData.emulateAs(mdHandle,'NFS')
       logLdp('DEBUG 1 - create a file...')
-      let fileHandle = await window.safeNfs.create(nfsHandle, randText)
-      logLdp('DEBUG 2 - insert file fileHandle: %s', fileHandle)
-      await window.safeNfs.insert(nfsHandle, fileHandle, randText)
+      let nfsFile = await this.storageNfs().create(randText)
+      logLdp('DEBUG 2 - insert file nfsFile: %s', nfsFile)
+      await this.storageNfs().insert(nfsFile, randText)
       logLdp('...done.')
       */
 
-      // Create an entry in rootContainer (fails if key exists for this container)
-      await this.setMutableDataValue(rootMd, rootKey, nameAndTag.name.buffer)
-      window.safeMutableData.free(mdHandle)
+      if (rootMd) {
+        // Create an entry in rootContainer (fails if key exists for this container)
+        await this.setMutableDataValue(rootMd, rootKey, nameAndTag.name.buffer)
+        this.mutableData.free(mdHandle)
+      }
+
       return nameAndTag
     } catch (err) {
       logApi('unable to create public container: ', err)
@@ -668,7 +779,7 @@ class SafenetworkApi {
 
       let servicesMd = await this.getServicesMdFor(host)
       serviceValue = await service.setupServiceForHost(host, servicesMd)
-      window.safeMutableData.free(servicesMd)
+      this.mutableData.free(servicesMd)
     } catch (err) {
       throw new Error('Failed to set up service \'' + serviceId + '\' - Error: ' + err)
     }
@@ -701,44 +812,44 @@ class SafenetworkApi {
       // Do this before updating _publicNames and even if that fails, we
       // still own the name so TODO check here first, if one exists that we own
       let servicesMdName = await this.makeServicesMdName(publicName)
-      let servicesMd = await window.safeMutableData.newPublic(this.appHandle(), servicesMdName, SN_TAGTYPE_SERVICES)
+      let servicesMd = await this.mutableData.newPublic(this.safeApp, servicesMdName, SN_TAGTYPE_SERVICES)
 
       var enc = new TextDecoder()
       logApi('created services MD with servicesMdName: %s', enc.decode(new Uint8Array(servicesMdName)))
 
-      let servicesEntriesHandle = await window.safeMutableData.newEntries(this.appHandle())
+      let servicesEntriesHandle = await this.mutableData.newEntries(this.safeApp)
 
       // TODO review this with Web Hosting Manager (separate into a make or init servicesMd function)
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
       let pmSet = ['Read', 'Update', 'Insert', 'Delete', 'ManagePermissions']
-      let pubKey = await window.safeCrypto.getAppPubSignKey(this.appHandle())
-      let pmHandle = await window.safeMutableData.newPermissions(this.appHandle())
-      await window.safeMutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
-      await window.safeMutableData.put(servicesMd, pmHandle, servicesEntriesHandle)
+      let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
+      let pmHandle = await this.mutableData.newPermissions(this.safeApp)
+      await this.mutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
+      await this.mutableData.put(servicesMd, pmHandle, servicesEntriesHandle)
 
       // TODO do I also need to set metadata?
       // TODO - see: http://docs.maidsafe.net/beaker-plugin-safe-app/#windowsafemutabledatasetmetadata
       // TODO free stuff!
       // TODO   - pubKey? - ask why no free() functions for cyrpto library handles)
-      // TODO   - servicesEntriesHandle (window.safeMutableData.newEntries doesn't say it should be freed)
-      await window.safeMutableDataPermissions.free(pmHandle)
+      // TODO   - servicesEntriesHandle (this.mutableData.newEntries doesn't say it should be freed)
+      await this.mutableDataPermissions.free(pmHandle)
 
       // TODO remove (test only):
-      let r = await window.safeMutableData.getNameAndTag(servicesMd)
+      let r = await this.mutableData.getNameAndTag(servicesMd)
       logApi('servicesMd created with tag: ', r.type_tag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
-      let publicNamesMd = await window.safeApp.getContainer(this.appHandle(), '_publicNames')
+      let publicNamesMd = await this.safeApi.getContainer(this.safeApp, '_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
-      let entriesHandle = await window.safeMutableData.getEntries(publicNamesMd)
-      let namesMutation = await window.safeMutableDataEntries.mutate(entriesHandle)
-      let encryptedKey = await window.safeMutableData.encryptKey(publicNamesMd, entryKey)
-      let encryptedValue = await window.safeMutableData.encryptValue(publicNamesMd, servicesMdName)
-      await window.safeMutableDataMutation.insert(namesMutation, encryptedKey, encryptedValue)
-      await window.safeMutableData.applyEntriesMutation(publicNamesMd, namesMutation)
-      await window.safeMutableDataMutation.free(namesMutation)
+      let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
+      let namesMutation = await this.mutableDataEntries.mutate(entriesHandle)
+      let encryptedKey = await this.mutableData.encryptKey(publicNamesMd, entryKey)
+      let encryptedValue = await this.mutableData.encryptValue(publicNamesMd, servicesMdName)
+      await this.mutableDataMutation.insert(namesMutation, encryptedKey, encryptedValue)
+      await this.mutableData.applyEntriesMutation(publicNamesMd, namesMutation)
+      await this.mutableDataMutation.free(namesMutation)
 
       // TODO remove (test only):
-      r = await window.safeMutableData.getNameAndTag(servicesMd)
+      r = await this.mutableData.getNameAndTag(servicesMd)
       /* logApi('DEBUG new servicesMd created with tag: ', r.type_tag, ' and name: ', r.name)
       logApi('DEBUG _publicNames entry created for %s', publicName)
       logApi('DEBUG servicesMd for public name \'%s\' contains...', publicName)
@@ -773,7 +884,7 @@ class SafenetworkApi {
   // @returns a promise which resolves true if the Mutable Data exists
   async mutableDataExists (mdHandle) {
     try {
-      await window.safeMutableData.getVersion(mdHandle)
+      await this.mutableData.getVersion(mdHandle)
       logApi('mutableDataExists(%s) TRUE', mdHandle)
       return true
     } catch (err) {
@@ -789,7 +900,7 @@ class SafenetworkApi {
   // @param host (or public-name), where host=[profile.]public-name
   //
   // @returns promise which resolves to the services MD of the given name
-  // You should free() the returned handle with window.safeMutableData.free
+  // You should free() the returned handle with this.mutableData.free
   async getServicesMdFor (host) {
     logApi('getServicesMdFor(%s)', host)
     let publicName = host.split('.')[1]
@@ -800,7 +911,7 @@ class SafenetworkApi {
 
       logApi("host '%s' has publicName '%s'", host, publicName)
       let servicesName = await this.makeServicesMdName(publicName)
-      let mdHandle = await window.safeMutableData.newPublic(this.appHandle(), servicesName, SN_TAGTYPE_SERVICES)
+      let mdHandle = await this.mutableData.newPublic(this.safeApp, servicesName, SN_TAGTYPE_SERVICES)
       if (await this.mutableDataExists(mdHandle)) {
         var enc = new TextDecoder()
         logApi('Look up SUCCESS for MD XOR name: ' + enc.decode(new Uint8Array(servicesName)))
@@ -823,7 +934,7 @@ class SafenetworkApi {
   // @param host (or public-name), where host=[profile.]public-name
   //
   // @returns promise which resolves to the services MD of the given name, or null
-  // You should free() the returned handle with window.safeMutableData.free
+  // You should free() the returned handle with this.mutableData.free
   async getServicesMdFromContainers (host) {
     logApi('getServicesMdFromContainers(%s)', host)
     try {
@@ -834,10 +945,10 @@ class SafenetworkApi {
       logApi("host '%s' has publicName '%s'", host, publicName)
 
       let nameKey = this.makePublicNamesEntryKey(publicName)
-      let mdHandle = await window.safeApp.getContainer(this.appHandle(), '_publicNames')
+      let mdHandle = await this.safeApi.getContainer(this.safeApp, '_publicNames')
       logApi('_publicNames ----------- start ----------------')
-      let entriesHandle = await window.safeMutableData.getEntries(mdHandle)
-      await window.safeMutableDataEntries.forEach(entriesHandle, (k, v) => {
+      let entriesHandle = await this.mutableData.getEntries(mdHandle)
+      await this.mutableDataEntries.forEach(entriesHandle, (k, v) => {
         logApi('Key: ', k.toString())
         logApi('Value: ', v.buf.toString())
         logApi('Version: ', v.version)
@@ -941,10 +1052,10 @@ class SafenetworkApi {
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
-      let entriesHandle = await window.safeMutableData.getEntries(servicesMd)
+      let entriesHandle = await this.mutableData.getEntries(servicesMd)
       logApi("checking servicesMd entries for host '%s'", host)
       this.hostedService = null
-      await window.safeMutableDataEntries.forEach(entriesHandle, async (k, v) => {
+      await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
         logApi('Key: ', k.toString())
         logApi('Value: ', v.buf.toString())
         logApi('Version: ', v.version)
@@ -998,7 +1109,7 @@ class SafenetworkApi {
   async getMdFromHash (hash, tagType) {
     logApi('getMdFromHash(%s,%s)...', hash, tagType)
     try {
-      return window.safeMutableData.newPublic(this.appHandle(), hash, tagType)
+      return this.mutableData.newPublic(this.safeApp, hash, tagType)
     } catch (err) {
       logApi('getMdFromHash() ERROR: %s', err)
       throw err
@@ -1016,7 +1127,7 @@ class SafenetworkApi {
   // @returns the XOR name as a String, for the services MD unique to the given public name
   async makeServicesMdName (publicName) {
     logApi('makeServicesMdName(%s)', publicName)
-    return window.safeCrypto.sha3Hash(this.appHandle(), publicName)
+    return this.crypto.sha3Hash(this.safeApp, publicName)
   }
 
   // Helper to create the key for looking up a public name entry in the _publicNames container
@@ -1081,7 +1192,7 @@ class SafenetworkApi {
   // XmlHttpRequest, then to support 'safe:' URIs it must first be
   // converted from those to use window.fetch() instead.
   //
-  // @param docUri {string}
+  // @param docUri {String}
   // @param options {Object}
   //
   // @returns null if not handled, or a {Promise<Object} on handling a safe: URI
@@ -1138,7 +1249,7 @@ class SafenetworkApi {
       logApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
 
       try {
-        response = await window.safeApp.webFetch(this.appHandle(), docUri, options)
+        response = await this.safeApi.webFetch(this.safeApp, docUri, options)
       } catch (err) {
         logApi('%s._fetch() error: %s', this.constructor.name, err)
         response = new Response(null, {status: 404, statusText: '404 Not Found'})
@@ -1252,19 +1363,19 @@ class SafenetworkApi {
   async listContainer (containerName) {
     logTest('listContainer(%s)...', containerName)
     logTest(containerName + ' ----------- start ----------------')
-    let mdHandle = await window.safeApp.getContainer(this.appHandle(), containerName)
+    let mdHandle = await this.safeApi.getContainer(this.safeApp, containerName)
     await this.listMd(mdHandle, containerName)
     logTest(containerName + '------------ end -----------------')
   }
 
   async listMd (mdHandle, name) {
-    let entriesHandle = await window.safeMutableData.getEntries(mdHandle)
+    let entriesHandle = await this.mutableData.getEntries(mdHandle)
     logTest('list mdHandle: %s', mdHandle)
-    await window.safeMutableDataEntries.forEach(entriesHandle, async (k, v) => {
+    await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
       let plainKey = k
-      try { plainKey = await window.safeMutableData.decrypt(mdHandle, k) } catch (e) { console.log('Key decryption ERROR: %s', e) }
+      try { plainKey = await this.mutableData.decrypt(mdHandle, k) } catch (e) { debug('Key decryption ERROR: %s', e) }
       let plainValue = v.buf
-      try { plainValue = await window.safeMutableData.decrypt(mdHandle, v.buf) } catch (e) { console.log('Value decryption ERROR: %s', e) }
+      try { plainValue = await this.mutableData.decrypt(mdHandle, v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
       let enc = new TextDecoder()
 
       plainKey = enc.decode(new Uint8Array(plainKey))
@@ -1470,8 +1581,8 @@ class SafeServiceWww extends ServiceInterface {
   //
   // @returns see window.fetch() and your services specification
   async _fetch () {
-    logApi('%s._fetch(%o) calling window.safeApp.webFetch()', this.constructor.name, arguments)
-    return window.safeApp.webFetch.apply(null, this.appHandle(), arguments)
+    logApi('%s._fetch(%o) calling this.safeApi.webFetch()', this.constructor.name, arguments)
+    return this.safeApi.webFetch.apply(null, this.safeApp, arguments)
   }
 }
 
@@ -1596,7 +1707,7 @@ class SafeServiceLDP extends ServiceInterface {
     let serviceValue = ''   // Default is do nothing
     let setup = this.getServiceConfig().setupDefaults
     if (setup.setupNfsContainer) {
-      let nameAndTag = await this.safeWeb().createPublicContainer(setup.defaultRootContainer, publicName, setup.defaultContainerName, this.getTagType())
+      let nameAndTag = await this.safeWeb().createNfsContainerMd(setup.defaultRootContainer, publicName, setup.defaultContainerName, this.getTagType())
 
       serviceValue = nameAndTag.name.buffer
       await this.safeWeb().setMutableDataValue(servicesMd, serviceKey, serviceValue)
@@ -1635,27 +1746,27 @@ class SafeServiceLDP extends ServiceInterface {
   *
   */
 
-  // Get the NFSHandle of the service's storage container
+  // Get the nfs emulation of the service's storage MD
   //
   // @returns a promise which resolves to the NfsHandle
   async storageNfs () {
-    if (this._storageNfsHandle) { return this._storageNfsHandle }
+    if (this._storageNfs) { return this._storageNfs }
 
     logLdp('storageNfs()')
     try {
-      this._storageNfsHandle = await window.safeMutableData.emulateAs(await this.storageMd(), 'NFS')
+      this._storageNfs = await this.storageMd().emulateAs('NFS')
       logLdp('this.storageMd: %s', await this.storageMd())
       /* TODO remove debug code:
-      logLdp('DEBUG this._storageNfsHandle: %s', this._storageNfsHandle)
+      logLdp('DEBUG this._storageNfs: %s', this._storageNfs)
       let randText = 'rand/' + Date.now()
       logLdp('DEBUG try insert a random filename', randText)
       logLdp('DEBUG 1 - create a file...')
-      let fileHandle = await window.safeNfs.create(this._storageNfsHandle, randText)
-      logLdp('DEBUG 2 - insert file fileHandle: %s', fileHandle)
-      await window.safeNfs.insert(this._storageNfsHandle, fileHandle, randText)
+      let nfsFile = await this.storageNfs().create(randText)
+      logLdp('DEBUG 2 - insert file nfsFile: %s', nfsFile)
+      await this.storageNfs().insert('filename',nfsFile)
       logLdp('...done.')
       */
-      return this._storageNfsHandle
+      return this._storageNfs
     } catch (err) {
       logLdp('Unable to access NFS storage for %s service: %s', this.getName(), err)
       throw (err)
@@ -1672,9 +1783,9 @@ class SafeServiceLDP extends ServiceInterface {
 
     try {
       // The service value is the address of the storage container (Mutable Data)
-      this._storageMd = await window.safeMutableData.newPublic(this.appHandle(), this.getServiceValue().buf, this.getTagType())
+      this._storageMd = await this.mutableData.newPublic(this.safeApp, this.getServiceValue().buf, this.getTagType())
       // TODO remove this existence check:
-      await window.safeMutableData.getVersion(this._storageMd)
+      await this.mutableData.getVersion(this._storageMd)
 
       logLdp('storageMd() - set: %s', this._storageMd)
       return this._storageMd
@@ -1817,7 +1928,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('                 param path: ' + docPath)
         logLdp('                 param version: ' + fileInfo.version)
         logLdp('                 param containerVersion: ' + fileInfo.containerVersion)
-        await window.safeNfs.delete(await this.storageNfs(), docPath, fileInfo.version + 1)
+        await this.storageNfs().delete(docPath, fileInfo.version + 1)
         this._fileInfoCache.delete(docUri)
         return new Response(null, {status: 204, statusText: '204 No Content'})
       }
@@ -1879,15 +1990,15 @@ class SafeServiceLDP extends ServiceInterface {
         // Strictly we shouldn't get here as the caller should test, but in case we do
         logLdp('WARNING: attempt to update a folder')
       } else {
-        // Store content as new immutable data (pointed to by fileHandle)
-        let fileHandle = await window.safeNfs.create(await this.storageNfs(), body)
+        // Store content as new immutable data (pointed to by nfsFile)
+        let nfsFile = await this.storageNfs().create(body)
 
-        // Add file to directory (by inserting fileHandle into container)
-        fileHandle = await window.safeNfs.update(await this.storageNfs(), fileHandle, docPath, fileInfo.containerVersion + 1)
-        await this._updateFileInfo(fileHandle, docPath)
+        // Add file to directory (by inserting nfsFile into container)
+        nfsFile = await this.storageNfs().update(docPath, nfsFile, fileInfo.containerVersion + 1)
+        await this._updateFileInfo(nfsFile, docPath)
 
         // TODO implement LDP PUT response https://www.w3.org/TR/ldp-primer/
-        return new Response(null, {status: (fileHandle ? 200 : 400)})
+        return new Response(null, {status: (nfsFile ? 200 : 400)})
       }
     } catch (err) {
       logLdp('Unable to update file \'%s\' : %s', docUri, err)
@@ -1907,16 +2018,16 @@ class SafeServiceLDP extends ServiceInterface {
     try {
       this.safeWeb().listContainer('_publicNames') // TODO remove this debug
 
-      // logLdp('DEBUG:  window.safeNfs.create()...')
-      let fileHandle = await window.safeNfs.create(await this.storageNfs(), body)
+      // logLdp('DEBUG:  this.storageNfs().create()...')
+      let nfsFile = await this.storageNfs().create(body)
       // mrhTODOx set file metadata (contentType) - how?
 
-      // Add file to directory (by inserting fileHandle into container)
-      // logLdp('DEBUG:  window.safeNfs.insert(nfsHandle,fileHandle,%s)...',docPath)
-      fileHandle = await window.safeNfs.insert(await this.storageNfs(), fileHandle, docPath)
+      // Add file to directory (by inserting nfsFile into container)
+      // logLdp('DEBUG:  this.storageNfs().insert(nfsHandle,nfsFile,%s)...',docPath)
+      nfsFile = await this.storageNfs().insert(nfsFile, docPath)
 
       // logLdp('DEBUG:  this._updateFileInfo(...)...')
-      this._updateFileInfo(fileHandle, docPath)
+      this._updateFileInfo(nfsFile, docPath)
 
       // TODO implement LDP POST response https://www.w3.org/TR/ldp-primer/
       return new Response(null, {status: 200, statusText: 'OK'})
@@ -1933,7 +2044,7 @@ class SafeServiceLDP extends ServiceInterface {
   // @param if options.includeBody is true, the response includes content (data)
   //
   // @returns a Promise which resolves to a Response object. On success, the response
-  // will contain file metadata available from the safeNfs fileHandle and a
+  // will contain file metadata available from the NFS emulation nfsFile and a
   // contentType based on the file extension
   //
   // TODO add support for content negotiation see node-solid-server/lib/handlers/get.js
@@ -1942,7 +2053,7 @@ class SafeServiceLDP extends ServiceInterface {
     logLdp('%s._getFile(%s,%O)', this.constructor.name, docUri, options)
     let docPath = this.safeWeb().nfsPathPart(docUri)
     let fileInfo = {}
-    let fileHandle
+    let nfsFile
     let retResponse
     try {
       if (!this.safeWeb().isConnected()) {
@@ -1952,10 +2063,10 @@ class SafeServiceLDP extends ServiceInterface {
       // TODO If the options are being used to retrieve specific version
       // should we get the latest version from the API first?
       try {
-        logLdp('window.safeNfs.fetch(nfsHandle,%s)...', docPath)
-        fileHandle = await window.safeNfs.fetch(await this.storageNfs(), docPath)
-        logLdp('fetched fileHandle: %s', fileHandle.toString())
-        fileInfo = await this._makeFileInfo(fileHandle, fileInfo, docPath)
+        logLdp('this.storageNfs().fetch(nfsHandle,%s)...', docPath)
+        nfsFile = await this.storageNfs().fetch(docPath)
+        logLdp('fetched nfsFile: %s', nfsFile.toString())
+        fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
       } catch (err) {
         return new Response(null, {status: 404, statusText: '404 File not found'})
       }
@@ -2006,41 +2117,36 @@ const ns = require('solid-namespace')($rdf)
       if (fileInfo.openHandle) {
         window.safeNfsFile.close(fileInfo.openHandle)
       }
-      if (fileHandle) {
-        window.safeNfs.free(fileHandle)
-      }
     }
   }
 
-  // Use fileHandle to insert metadata into given fileInfo
+  // Use nfsFile to insert metadata into given fileInfo
   //
   // returns a Promise which resolves to a fileInfo object
   // Note: if the fileInfo object includes an openHandle this should be closed by the caller
-  async _makeFileInfo (fileHandle, fileInfo, docPath) {
+  async _makeFileInfo (nfsFile, fileInfo, docPath) {
     try {
-      let fileMetadata = await window.safeNfsFile.metadata(fileHandle)
-      fileInfo.openHandle = await window.safeNfs.open(await this.storageNfs(), fileHandle, 4/* read TODO get from safeApp.CONSTANTS */)
-
-      fileInfo.size = await window.safeNfsFile.size(fileInfo.openHandle)
-      fileInfo.created = fileMetadata.created
-      fileInfo.modified = fileMetadata.modified
-      fileInfo.version = fileMetadata.version
-      fileInfo.ETag = fileMetadata.version
-      fileInfo.dataMapName = fileMetadata.dataMapName // TODO Debug only!
-      this._fileInfoCache.set(docPath, fileInfo)    // Update the cached version
+//      fileInfo.openHandle = await nfsFile.open(4/* read TODO get from safeApp.CONSTANTS */)
+      fileInfo.size = nfsFile.size
+      fileInfo.created = nfsFile.created
+      fileInfo.modified = nfsFile.modified
+      fileInfo.version = nfsFile.version
+      fileInfo.ETag = nfsFile.version
+      fileInfo.dataMapName = nfsFile.dataMapName // TODO Debug only!
+      this._fileInfoCache.set(docPath, nfsFile)    // Update the cached version
       return fileInfo
     } catch (err) {
-      logLdp('_makeFileInfo(%s) > safeNfsFile.metadata() FAILED: %s', docPath, err)
+      logLdp('_makeFileInfo(%s) > nfsFile metadata access FAILED: %s', docPath, err)
       throw err
     }
   }
 
-  // Use fileHandle to update cached fileInfo with metadata
+  // Use nfsFile to update cached fileInfo with metadata
   //
   // returns a Promise which resolves to an updated fileInfo
-  async _updateFileInfo (fileHandle, docPath) {
+  async _updateFileInfo (nfsFile, docPath) {
     try {
-      let fileInfo = await this._makeFileInfo(fileHandle, {}, docPath)
+      let fileInfo = await this._makeFileInfo(nfsFile, {}, docPath)
       if (fileInfo) {
         return fileInfo
       } else { throw new Error('_updateFileInfo( ' + docPath + ') - unable to update - no existing fileInfo') }
@@ -2081,9 +2187,9 @@ const ns = require('solid-namespace')($rdf)
       debug('safe:TMP')('1')
       // Create listing by enumerating container keys beginning with docPath
       const directoryEntries = []
-      let entriesHandle = await window.safeMutableData.getEntries(await this.storageMd())
+      let entriesHandle = await this.mutableData.getEntries(await this.storageMd())
       debug('safe:TMP')('2')
-      await window.safeMutableDataEntries.forEach(entriesHandle, async (k, v) => {
+      await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
         debug('safe:TMP')('3')
         // Skip deleted entries
         if (v.buf.length === 0) {
@@ -2117,7 +2223,7 @@ const ns = require('solid-namespace')($rdf)
 
             try {
               debug('safe:TMP')('7')
-              /*              if (await window.safeMutableDataEntries.get(entriesHandle, testPath)) {
+              /*              if (await this.mutableDataEntries.get(entriesHandle, testPath)) {
               metaFilePath = testPath
             }
             */            } catch (err) {
@@ -2255,17 +2361,17 @@ const ns = require('solid-namespace')($rdf)
   async _getMetadataGraph (metaFilePath, docUri) {
     logLdp('%s._getMetadataGraph(%s,%s)...', this.constructor.name, metaFilePath, docUri)
 
-    let fileHandle
+    let nfsFile
     let fileInfo = {}
     let metadataGraph
     try {
-      fileHandle = await window.safeNfs.fetch(await this.storageNfs(), metaFilePath)
+      nfsFile = await this.storageNfs().fetch(metaFilePath)
     } catch (err) {}
 
     try {
       // Metadata file exists
-      if (fileHandle) {
-        fileInfo.openHandle = await window.safeNfs.open(await this.storageNfs(), fileHandle, 4/* read TODO get from safeApp.CONSTANTS */)
+      if (nfsFile) {
+        fileInfo.openHandle = await this.storageNfs().open(nfsFile, 4/* read TODO get from safeApp.CONSTANTS */)
         let content = await window.safeNfsFile.read(fileInfo.openHandle, 0, fileInfo.size)
 
         if (content) {
@@ -2295,10 +2401,6 @@ const ns = require('solid-namespace')($rdf)
     } finally {
       if (fileInfo.openHandle) {
         await window.safeNfsFile.close(fileInfo.openHandle)
-      }
-
-      if (fileHandle) {
-        await window.safeNfs.free(fileHandle)
       }
     }
 
@@ -2375,7 +2477,7 @@ const ns = require('solid-namespace')($rdf)
 
       // Folders //
       let smd = await this.storageMd()
-      let containerVersion = await window.safeMutableData.getVersion(smd)
+      let containerVersion = await this.mutableData.getVersion(smd)
       if (docPath === '/') {
         return { path: docPath, ETag: containerVersion.toString() }
       } // Dummy fileInfo to stop at "root"
@@ -2391,12 +2493,12 @@ const ns = require('solid-namespace')($rdf)
       }
 
       // Files //
-      let fileHandle
+      let nfsFile
       try {
         let nfsPath = docPath.slice(1)
-        fileHandle = await window.safeNfs.fetch(await this.storageNfs(), nfsPath)
-        logLdp('_getFileInfo() - fetched fileHandle: %s', fileHandle.toString())
-        fileInfo = await this._makeFileInfo(fileHandle, {}, docPath)
+        nfsFile = await this.storageNfs().fetch(nfsPath)
+        logLdp('_getFileInfo() - fetched nfsFile: %s', nfsFile.toString())
+        fileInfo = await this._makeFileInfo(nfsFile, {}, docPath)
         fileInfo.containerVersion = containerVersion
       } catch (err) {
         fileInfo = null
@@ -2408,9 +2510,6 @@ const ns = require('solid-namespace')($rdf)
 
       if (fileInfo) {
         this._fileInfoCache.set(docPath, fileInfo)
-        if (fileHandle) {
-          window.safeNfs.free(fileHandle)
-        }
 
         return fileInfo
       } else {
@@ -2425,16 +2524,292 @@ const ns = require('solid-namespace')($rdf)
   }
 }
 
-// TODO change to export class, something like this (example rdflib Fetcher.js)
-// class SafenetworkApi {...}
-// let safeWeb = new SafenetworkApi()
-// module.exports = SafenetworkApi
-// module.exports.safeWeb = safeWeb
+// TODO move these classes to their own files
+
+const containerClasses: [
+  '_public': PublicContainer,
+  '_documents': PrivateContainer,
+  '_photos': PrivateContainer,
+  '_music': PrivateContainer,
+  '_video': PrivateContainer,
+  '_publicNames': PublicNamesContainer,
+]
+
+/**
+ * Wrapper for public root container (_public)
+ *
+ * Currently supports _public
+ */
+class PublicContainer {
+  /**
+   * @param {Object} safeJs  SafenetworkApi (owner)
+   * @param {String} containerName (optional) defaults to '_public'
+   */
+  constructor (safeJs, containerName) {
+    if (containerClasses[containerName] !== PublicContainer) {
+      throw new Error('Invalid PublicContainer name:' + containerName)
+    }
+    this._safeJs = safeJs       // SafenetworkJs instance
+    this._name = (containerName !== undefined ? containerName : '_public')
+  }
+
+  isPublic () { return true }
+
+  /**
+   * Initialise by accessing the container MutableData
+   * @return {Promise} the MutableData for this container
+   */
+  async initialise () {
+    this._mData = this._safeJs.auth().getContainer(this._name)
+    return this._mData
+  }
+
+  async createNfsFolder (folderPath) {
+
+  }
+
+  async insertNfsFolder (nfsFolder) {
+
+  }
+
+  /**
+   * Get the MutableData entry for entryKey
+   * @param  {String}         entryKey
+   * @return {Promise}        resolves to ValueVersion
+   */
+  async getEntry (entryKey) {
+    // TODO
+  }
+}
+
+/**
+ * Wrapper for private root container such as '_documents', '_music'
+ *
+ * TODO implement support for private containers (_documents, _music etc)
+ * TODO implement support for application own container
+ */
+class PrivateContainer extends PublicContainer {
+  /**
+   * @param {Object} safeJs  SafenetworkApi (owner)
+   * @param {String} containerName Name of a private root container such as '_documents'
+   */
+  constructor (safeJs, containerName) {
+    if (containerClasses[containerName] !== PrivateContainer) {
+      throw new Error('Invalid PrivateContainer name:' + containerName)
+    }
+    this._safeJs = safeJs
+    this._containerName = containerName
+  }
+
+  isPublic () { return false }
+
+  /**
+   * Initialise by accessing the container MutableData
+   * @return {Promise} the MutableData for this container
+   */
+  // async initialise () {
+  //   return super.initialise()
+  // }
+
+  /**
+   * Get the MutableData entry for entryKey
+   * @param  {String}         entryKey
+   * @return {Promise}        resolves to ValueVersion
+   */
+  async getEntry (entryKey) {
+    // TODO
+  }
+}
+
+/* TODO not sure if this is best as 'extends' or a stand-alone class
+class PublicNamesContainer {
+  constructor (safeJs) {
+    if (containerClasses[containerName] !== PublicNamesContainer) {
+      throw new Error('Invalid PublicNamesContainer name:' + containerName)
+    }
+    this._safeJs = safeJs
+    this._containerName = containerName
+  }
+}
+*/
+
+/**
+ * Wrapper for MutableData services container (for a public name)
+ */
+class ServicesContainer {
+  /**
+   * @param {Object} safeJs  SafenetworkApi (owner)
+   * @param {String} publicName public name for which this holds services
+   */
+  constructor (safeJs, publicName) {
+    throw new Error('ServicesContainer not yet implemented')
+    this._safeJs = safeJs
+    this._name = publicName
+  }
+
+  /**
+   * Initialise by accessing services MutableData for a public name
+   * @param  {Boolean}  createNew access (false) or create (true) services MutableData
+   * @return {Promise}
+   */
+  async initialiseExisting (createNew) {
+    this._mData = undefined // TODO
+  }
+
+  // TODO add methods to access existing service entries (e.g. enumerate, get by name)
+}
+
+/**
+ * Wrapper for 'NFS' emulation MutableData
+ *
+ * TODO NfsContainer - implement private MD (currently only creates public MDs)
+ */
+
+// NOTES:
+// The method for creating public SAFE NFS containers is not currently
+// documented by MaidSafe and is instead defined by the Web Hosting Manager
+// example, here:
+//   https://github.com/maidsafe/safe_examples/blob/master/web_hosting_manager/app/safenet_comm/api.js#L150
+//
+// In summary, when the Web Hosting Manager creates an NFS container for a www
+// service it uses newRandomPublic(CONSTANTS.TYPE_TAG.WWW) to create the MutableData
+// container, uses quickSetup to apply metadata as:
+//   const metaName = `Service Root Directory for: serviceName.publicName`;
+//   const metaDesc = `Has the files hosted for the service: serviceName.publicName`;
+//   await servFolder.quickSetup({}, metaName, metaDesc);
+// It then inserts an entry into the _public container with
+//   key:   service path, such as 'somefolder/lastfolder' (default for www service is '<public-name>/www-root')
+//   value: the XoR-name/address on the network (as a Buffer from from getNameAndTag())
+
+class NfsContainer {
+  /**
+   * [constructor description]
+   * @param {SafenetworkJs} safeJs  SafenetworkJS API object
+   * @param {String} nameOrKey  MD name, or if a parent container is given, the key of the MD entry containing the name
+   * @param {Object} parent (optional) typically a RootContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
+   * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
+   */
+  constructor (safeJs, nameOrKey, parent, isPublic) {
+    this._safeJs = safeJs
+    if (parent) {
+      this._parent = parent
+      this._entryKey = nameOrKey
+    } else {
+      this._parent = undefined
+      this._mdName = nameOrKey
+      this._isPublic = isPublic
+      this._tagType = SN_TAGTYPE_NFS
+    }
+  }
+
+  isPublic () { return this._isPublic }
+
+  /**
+   * Initialise by accessing existing MutableData compatible with NFS emulation
+   * @return {Promise}
+   */
+  async initialiseExisting () {
+    if (!this._parent) {
+      throw new Error('TODO add support for XOR nameOrKey to NfsContainer')
+    }
+
+    try {
+      if (this._parent) {
+        let valueVersion = await this._parent.getEntry(this._entryKey)
+        this._mdName = valueVersion.value
+      }
+
+      this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
+    } catch (err) {
+      let info = (this._parent ? this._parent.name + '/' + this._entryKey : this._mdName)
+      throw new Error('NfsContainer failed to init existing MD for ' + info)
+    }
+  }
+
+  /**
+   * create an NFS MutableData and insert into a parent container if present
+   * @param  {String} ownerName (optional) if provided, usually the public name on which this folder is used
+   * @param  {Boolean} isPublic (optional) if present overrides constructor
+   * @return {Promise}          a newly created {MutableData}
+   */
+  async createNew (ownerName, isPublic) {
+    if (!ownerName) ownerName = ''
+    if (!isPublic) isPublic = this._isPublic
+    let containerName = (this._parent ? this._parent._name : '')
+    return this._safeJs.createNfsContainerMd(containerName, ownerName, this._mdName, this._tagType, !isPublic)
+  }
+
+  /**
+   * create a general purpose NFS container in _public
+   * @param  {Number}  tagType         (optional) SAFE MutableData tagType
+   * @param  {String}  metaName        (optional) metadata describing what this is for
+   * @param  {String}  metaDescription (optional) metadata explaining what this contains
+   * @return {Promise}                 ???
+   */
+  // TODO create a general purpose NFS container in _public
+  async createPublicFolder (tagType, metaName, metaDescription) {
+    throw new Error('createPublicFolder() not yet implemented')
+    // if (!tagType) tagType = ???
+    // if (!metaName) metaName = ???
+    // if (!metaDescription) metaDescription = ???
+
+    // TODO
+  }
+
+  /**
+   * create an NFS container in _public for a SAFE service
+   * @param  {number}  tagType     (optional) SAFE MutableData tagType (defaults to www)
+   * @param  {String}  servicePath (optional) Defaults to <public-name>@www
+   * @param  {String}  metaFor     will be of `serviceName.publicName` format
+   * @return {Promise}             ???
+   */
+  // When to use the container classes, SafenetworkApi or ServicesInterface classes?
+  //
+  // The RootContainer, ServicesContainer, NfsContainer etc classes provide
+  // a simple API to manage the main SAFE API types and their containers, while
+  // the classes and methods which they rely on (including methods on SafenetworkApi
+  // and the ServiceInteface class) provide greater control and additional
+  // functionality such as SAFE services accessible via fetch() in web
+  // applications, and possibly also on desktop. For example, a web library which
+  // uses fetch() to access RESTful web services could be used without
+  // modification along with SafenetworkJs to access those services on
+  // SAFE Network, if implemented using a custom ServiceInterface (cf. SafeServiceLDP)
+  //
+  // So if you just want to access and create standard SAFE containers and
+  // data types such as public names or share public files and websites,
+  // the container classes are intended to do everything you might need.
+  // You can still dip into the other methods where needed.
+
+  // TODO create an NFS container in _public for a SAFE service
+  // TODO modify this to use the service classes and service configs rather than have duplicate code
+  // TODO I think servicePath might change - check status with Gabriel re my proposals
+  // TODO here: https://forum.safedev.org/t/proposals-for-restful-service-handling/1550
+  // TODO Gabriel had some responses/alternatives which I liked but can't find those.
+  async createServiceFolder (tagType, servicePath, metaFor) {
+    throw new Error('createServiceFolder() not yet implemented')
+    // if (!tagType) tagType = safeApi.CONSTANTS.TYPE_TAG.WWW
+    // if (!metaName) metaName = `Service Root Directory for: ${metaFor}`
+    // if (!metaDescription) metaDescription = `Has the files hosted for the service: ${metaFor}`
+
+    // TODO implement - see TO DO notes above
+  }
+}
 
 // Usage: create the web API and install the built in services
 // let safeWeb = new SafenetworkApi()
 
 module.exports = SafenetworkApi
+
+module.exports.RootContainer = PublicContainer
+module.exports.ServicesContainer = ServicesContainer
+module.exports.NfsContainer = NfsContainer
+
+// TODO ??? change to export class, something like this (example rdflib Fetcher.js)
+// class SafenetworkApi {...}
+// let safeWeb = new SafenetworkApi()
+// module.exports = SafenetworkApi
+// module.exports.safeWeb = safeWeb
+
 /* TODO remove this and all refs to safeWeb (for current usage see README.md)
 module.exports.safeWeb = safeWeb
 module.exports.setSafeApi = SafenetworkApi.prototype.setSafeApi.bind(safeWeb)
