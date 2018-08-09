@@ -241,8 +241,8 @@ class SafenetworkApi {
     this._authOnAccessDenied = false  // Used by simpleAuthorise() and fetch()
 
     // Cached API Objects
-    this._containers = {} // Active RootContainer objects
-    this._folders = {}    // Active NfsContainer objects
+    this._rootContainers = {} // Active RootContainer objects
+    this._nfsContainers = {}    // Active NfsContainer objects
 
     // Application specific configuration required for authorisation
     this._safeAppConfig = {}
@@ -504,7 +504,7 @@ class SafenetworkApi {
           this._nfsContainers[nameOrKey] = container
         })
       } else {
-        container.intitialise().then(() => {
+        container.initialiseExisting().then(() => {
           this._nfsContainers[nameOrKey] = container
         })
       }
@@ -2451,7 +2451,7 @@ const ns = require('solid-namespace')($rdf)
   //
   // See node-solid-server/lib/ldp-container.js addStats()
   async _addFileInfo (resourceGraph, reqUri, fileInfo) {
-    logLdp('%s._addFileInfo(g,%s,%o)', this.constructor.name,  reqUri, fileInfo)
+    logLdp('%s._addFileInfo(g,%s,%o)', this.constructor.name, reqUri, fileInfo)
 
     resourceGraph.add(resourceGraph.sym(reqUri),
     ns.stat('size'),
@@ -2563,15 +2563,6 @@ const ns = require('solid-namespace')($rdf)
 
 // TODO move these classes to their own files
 
-const containerClasses: [
-  '_public': PublicContainer,
-  '_documents': PrivateContainer,
-  '_photos': PrivateContainer,
-  '_music': PrivateContainer,
-  '_video': PrivateContainer,
-  '_publicNames': PublicNamesContainer,
-]
-
 /**
  * Wrapper for public root container (_public)
  *
@@ -2583,9 +2574,6 @@ class PublicContainer {
    * @param {String} containerName (optional) defaults to '_public'
    */
   constructor (safeJs, containerName) {
-    if (containerClasses[containerName] !== PublicContainer) {
-      throw new Error('Invalid PublicContainer name:' + containerName)
-    }
     this._safeJs = safeJs       // SafenetworkJs instance
     this._name = (containerName !== undefined ? containerName : '_public')
   }
@@ -2597,6 +2585,10 @@ class PublicContainer {
    * @return {Promise} the MutableData for this container
    */
   async initialise () {
+    if (containerClasses[this._name] !== PublicContainer) {
+      throw new Error('Invalid PublicContainer name:' + this._name)
+    }
+
     this._mData = this._safeJs.auth().getContainer(this._name)
     return this._mData
   }
@@ -2631,9 +2623,7 @@ class PrivateContainer extends PublicContainer {
    * @param {String} containerName Name of a private root container such as '_documents'
    */
   constructor (safeJs, containerName) {
-    if (containerClasses[containerName] !== PrivateContainer) {
-      throw new Error('Invalid PrivateContainer name:' + containerName)
-    }
+    super(safeJs, containerName)
     this._safeJs = safeJs
     this._containerName = containerName
   }
@@ -2646,6 +2636,9 @@ class PrivateContainer extends PublicContainer {
    */
   // async initialise () {
   //   return super.initialise()
+      // if (containerClasses[containerName] !== PrivateContainer) {
+      //   throw new Error('Invalid PrivateContainer name:' + containerName)
+      // }
   // }
 
   /**
@@ -2849,6 +2842,15 @@ class NfsContainer {
   async ftruncate (itemPath) { debug('TODO NfsContainer ftruncate(' + itemPath + ') not implemented'); return {} }
   async mknod (itemPath) { debug('TODO NfsContainer mknod(' + itemPath + ') not implemented'); return {} }
   async utimens (itemPath) { debug('TODO NfsContainer utimens(' + itemPath + ') not implemented'); return {} }
+}
+
+const containerClasses = {
+  '_public': PublicContainer,
+  '_documents': PrivateContainer,
+  '_photos': PrivateContainer,
+  '_music': PrivateContainer,
+  '_video': PrivateContainer
+// TODO  '_publicNames': PublicNamesContainer
 }
 
 // Usage: create the web API and install the built in services
