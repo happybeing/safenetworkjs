@@ -17,6 +17,23 @@
 [ ] modify my SafenetworkApi authorise methods to select between the two
 */
 
+// TODO remove this
+const fakeReadDir = {
+  '/': ['_public', 'two', 'three'],
+  '/_public': ['four', 'five', 'happybeing']
+}
+
+// TODO remove this
+const fakeGetattr = {
+  '/': 'directory',
+  '/_public': 'directory',
+  '/two': 'file',
+  '/three': 'file',
+  '/_public/four': 'file',
+  '/_public/five': 'file',
+  '/_public/happybeing': 'file'
+}
+
 /*
 * SafenetworkJS - Application API for SAFE Network (base level)
 *
@@ -470,17 +487,27 @@ class SafenetworkApi {
   /**
    * Get an initialised NfsContainer instance
    * @param {String} nameOrKey  Either the path (starting with a public container) or the XOR address
-   * @param  {boolean}  createNew access (false) or create (true) NFS MutableData
+   * @param  {Boolean}  createNew (optional) true if you want to create a new NFS MutableData
+   * @param  {Boolean}  isPublic (optional) if createNew, specify true to make it shareable (eg in _public)
    * @param {Object} parent (optional) typically a RootContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
    * @return {Object}               initialised instance of NfsContainer
    */
-  async getNfsContainer (nameOrKey, createNew, parent) {
+  async getNfsContainer (nameOrKey, createNew, isPublic, parent) {
     let container = this._nfsContainers[nameOrKey]
     if (!container) {
+      if (!createNew) createNew = false
       container = new NfsContainer(this, nameOrKey, parent)
-      container.intitialise(createNew).then(() => {
-        this._nfsContainers[nameOrKey] = container
-      })
+      if (createNew) {
+        if (!isPublic) isPublic = false // Defaut to private
+        let ownerName = ''  // Not known (typically a public name so this is just omitted)
+        container.createNew(ownerName, isPublic).then(() => {
+          this._nfsContainers[nameOrKey] = container
+        })
+      } else {
+        container.intitialise().then(() => {
+          this._nfsContainers[nameOrKey] = container
+        })
+      }
     }
 
     return container
@@ -1099,6 +1126,16 @@ class SafenetworkApi {
   * Helper Methods
   * --------------
   */
+
+  /**
+   * Test if a standard SAFE root container name is public
+   * @param  {String}  name  the name of a root container ('_public', '_documents' etc)
+   * @return {Boolean}       true if the name is a recognised as a public root container
+   */
+  isPublicContainer (containerName) {
+      // Currently there is only _public
+      return contanerName === '_public'
+  }
 
   // Helper to get a mutable data handle for an MD hash
   //
@@ -2649,10 +2686,9 @@ class ServicesContainer {
 
   /**
    * Initialise by accessing services MutableData for a public name
-   * @param  {Boolean}  createNew access (false) or create (true) services MutableData
    * @return {Promise}
    */
-  async initialiseExisting (createNew) {
+  async initialiseExisting () {
     this._mData = undefined // TODO
   }
 
@@ -2793,6 +2829,26 @@ class NfsContainer {
 
     // TODO implement - see TO DO notes above
   }
+
+  // Simple FUSE like file system API
+  async readdir (itemPath) {
+    debug('NfsContainer readdir(' + itemPath + ')')
+    return fakeReadDir[itemPath]
+  }
+
+  async mkdir (itemPath) { debug('TODO NfsContainer mkdir(' + itemPath + ') not implemented'); return {} }
+  async statfs (itemPath) { debug('TODO NfsContainer statfs(' + itemPath + ') not implemented'); return {} }
+  async getattr (itemPath) { debug('TODO NfsContainer getattr(' + itemPath + ') not implemented'); return {} }
+  async create (itemPath) { debug('TODO NfsContainer create(' + itemPath + ') not implemented'); return {} }
+  async open (itemPath) { debug('TODO NfsContainer open(' + itemPath + ') not implemented'); return {} }
+  async write (itemPath) { debug('TODO NfsContainer write(' + itemPath + ') not implemented'); return {} }
+  async read (itemPath) { debug('TODO NfsContainer read(' + itemPath + ') not implemented'); return {} }
+  async unlink (itemPath) { debug('TODO NfsContainer unlink(' + itemPath + ') not implemented'); return {} }
+  async rmdir (itemPath) { debug('TODO NfsContainer rmdir(' + itemPath + ') not implemented'); return {} }
+  async rename (itemPath) { debug('TODO NfsContainer rename(' + itemPath + ') not implemented'); return {} }
+  async ftruncate (itemPath) { debug('TODO NfsContainer ftruncate(' + itemPath + ') not implemented'); return {} }
+  async mknod (itemPath) { debug('TODO NfsContainer mknod(' + itemPath + ') not implemented'); return {} }
+  async utimens (itemPath) { debug('TODO NfsContainer utimens(' + itemPath + ') not implemented'); return {} }
 }
 
 // Usage: create the web API and install the built in services
