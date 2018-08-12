@@ -112,6 +112,8 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
   safeApi = require('./bootstrap')
 }
 
+require('fast-text-encoding') // TextEncoder, TextDecoder
+
 // Decorated console output
 const debug = require('debug')
 const logApi = require('debug')('safenetworkjs:web')  // Web API
@@ -218,11 +220,12 @@ class SafenetworkApi {
     this.safeApi = safeApi
     if (safeApi.bootstrap !== undefined) {
       // bootstrap is for auth from node and CLI
-      this.bootstrap = (appConfig, appPermissions, argv) => {
-        return safeApi.bootstrap(appConfig, appPermissions, argv).then((safeApp) => {
+      this.bootstrap = (appConfig, appContainers, containerOpts, argv) => {
+        return safeApi.bootstrap(appConfig, appContainers, containerOpts, argv).then((safeApp) => {
           this.setSafeApi(safeApp)
           this._safeAppConfig = appConfig
-          this._safeAppPermissions = appPermissions
+          this._safeAppContainers = appContainers
+          this._safeContainerOpts = containerOpts
           this._safeAuthUri = ''  // TODO refactor to get this from safeApi.bootstrap()
           return safeApp
         })
@@ -389,12 +392,12 @@ class SafenetworkApi {
   // - if authorising using another method, you MUST call SafenetworkApi.setApi() with a valid SAFEAppHandle
   //
   // @param appConfig      - information for auth UI - see DOM API this.safeApi.initialise()
-  // @param appPermissions - (optional) requested permissions - see DOM API this.safeApi.authorise()
+  // @param appContainers - (optional) requested permissions - see DOM API this.safeApi.authorise()
   //
   // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
-  async simpleAuthorise (appConfig, appPermissions) {
-    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appPermissions)
+  async simpleAuthorise (appConfig, appContainers) {
+    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appContainers)
 
     // TODO ??? not sure what I'm thinking here...
     // TODO probably best to have initialise called once at start so can
@@ -415,7 +418,7 @@ class SafenetworkApi {
       this.setSafeApi(tmpAppHandle)
       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
       this._safeAppConfig = appConfig
-      this._safeAppPermissions = (appPermissions !== undefined ? appPermissions : defaultPerms)
+      this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
 
       // await this.testsNoAuth();  // TODO remove (for test only)
       this._safeAuthUri = this.safeApp().auth.genAthUri(this._safeAppPermissions, this._safeAppConfig.options)
@@ -925,6 +928,17 @@ class SafenetworkApi {
     } catch (err) {
       logApi('mutableDataExists(%s) FALSE', mdHandle)
       return false  // Error indicates this MD doens't exist on the network
+    }
+  }
+
+  async mutableDataStats (mData) {
+    // TODO work out some useful stats for a container and use the values in safenetwork-fuse/fuse-operations/statfs.js
+    // TODO probably worth basing this on the MD entry count and size (if poss)
+    return {
+      // TODOThese members are junk (inherited from IPFS code so change them!)
+      repoSize: 12345,
+      storageMax: 99999,
+      numObjects: 321
     }
   }
 
@@ -1439,7 +1453,7 @@ class SafenetworkApi {
     })
   }
   // //// END of debugging helpers
-};
+}
 
 class ServiceInterface {
   // An abstract class which defines the interface to a SAFE Web Service
@@ -2589,6 +2603,7 @@ class PublicContainer {
   }
 
   isPublic () { return true }
+  isSelf (itemPath) { return this._name.indexOf(itemPath.substr(1)) }
 
   /**
    * Initialise by accessing the container MutableData
@@ -2599,12 +2614,17 @@ class PublicContainer {
       throw new Error('Invalid PublicContainer name:' + this._name)
     }
 
-    this._mData = this._safeJs.auth.getContainer(this._name)
-    return this._mData
+    return this._safeJs.auth.getContainer(this._name).then((mData) => {
+      this._mData = mData
+    }).catch((error) => {
+      let msg = 'PublicContainer initialise failed to get container: ' + this._name + ' (' + error.message + ')'
+      debug(msg + '\n' + error.stack)
+      throw new Error(msg)
+    })
   }
 
   async createNfsFolder (folderPath) {
-
+    debug('createNfsFolder(%s)', folderPath)
   }
 
   async insertNfsFolder (nfsFolder) {
@@ -2612,7 +2632,53 @@ class PublicContainer {
   }
 
   async listFolder (folderPath) {
-    return ['this', 'is', 'a', 'listing', 'for', 'PublicContainer.listFolder(' + folderPath + ')']
+    debug('listFolder(%s)', folderPath)
+    let name = 'XXX' // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+    let listing = []
+    let entries = await this._mData.getEntries()
+    await entries.forEach(async (k, v) => {
+      let plainValue = v.buf
+      try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+
+      let enc = new TextDecoder()
+      let plainKey = enc.decode(new Uint8Array(k))
+      if (plainKey !== k.toString())
+        debug('%s Key (encrypted): ', name, k.toString())
+
+        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
+      debug('%s Key            : ', name, plainKey)
+
+      plainValue = enc.decode(new Uint8Array(plainValue))
+      if (plainValue !== v.buf.toString())
+        debug('%s Value (encrypted): ', name, v.buf.toString())
+
+      debug('%s Value            :', name, plainValue)
+
+      debug('%s Version: ', name, v.version)
+
+      // For any key that is longer than folderPath get the 'contained' item
+      let remainder = plainKey.substr(folderPath.length)
+      remainder = remainder.split(path.sep)[1]
+      if (remainder.length && listing.indexOf(remainder) === -1) {
+        listing.push(remainder)
+      }
+    })
+
+    return listing
+  }
+
+  async itemInfo (itemPath) {
+    debug('itemInfo(%s)', itemPath)
+    if (this.isSelf(itemPath)) {
+      return this._safeJs.mutableDataStats(this._mData)
+    } else {
+      return this._safeJs.mutableDataStats(this._mData) // TODO replace with info for the entry
+    }
+  }
+
+  async itemAttributes (itemPath) {
+    debug('itemInfo(%s)', itemPath)
+    return { isFile: (!this.isSelf(itemPath) || itemPath.substr(-1) === path.sep) }
   }
 
   /**
@@ -2631,8 +2697,8 @@ class PublicContainer {
    */
   async readdir (itemPath) { debug('PublicContainer readdir(' + itemPath + ')'); return this.listFolder(itemPath) }
   async mkdir (itemPath) { debug('TODO PublicContainer mkdir(' + itemPath + ') not implemented'); return {} }
-  async statfs (itemPath) { debug('TODO PublicContainer statfs(' + itemPath + ') not implemented'); return {} }
-  async getattr (itemPath) { debug('TODO PublicContainer getattr(' + itemPath + ') not implemented'); return {} }
+  async statfs (itemPath) { debug('PublicContainer statfs(' + itemPath + ')'); return this.itemInfo(itemPath) }
+  async getattr (itemPath) { debug('PublicContainer getattr(' + itemPath + ')'); return this.itemAttributes(itemPath) }
   async create (itemPath) { debug('TODO PublicContainer create(' + itemPath + ') not implemented'); return {} }
   async open (itemPath) { debug('TODO PublicContainer open(' + itemPath + ') not implemented'); return {} }
   async write (itemPath) { debug('TODO PublicContainer write(' + itemPath + ') not implemented'); return {} }

@@ -49,7 +49,7 @@ debug = function (d) {
 // No stdout from node-ipc
 // ipc.config.silent = true
 
-Safe.bootstrap = async (appInfo, permissions, argv) => {
+Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
   debug('__dirname: ' + String(__dirname))
   debug('\nSafe.bootstrap()\n  with appInfo: ' + JSON.stringify(appInfo) +
     '  argv: ' + JSON.stringify(argv))
@@ -73,7 +73,7 @@ Safe.bootstrap = async (appInfo, permissions, argv) => {
   if (argv.uri !== undefined) {
     uri = argv.uri
   } else {
-    await authorise(process.pid, appInfo, permissions, options)
+    await authorise(process.pid, appInfo, appContainers, containerOpts, options)
     debug('ipcReceive(' + process.pid + ')')
     uri = await ipcReceive(String(process.pid))
   }
@@ -81,7 +81,7 @@ Safe.bootstrap = async (appInfo, permissions, argv) => {
   return Safe.fromAuthURI(appInfo, uri, null, options)
 }
 
-async function authorise (pid, appInfo, permissions, options) {
+async function authorise (pid, appInfo, appContainers, containerOpts, options) {
   // For development can provide a pre-compiled cmd to receive the auth URL
   // This allows the application to be run and debugged using node
   if (!appInfo.customExecPath) {
@@ -91,11 +91,14 @@ async function authorise (pid, appInfo, permissions, options) {
       '--uri'
     ]
   }
-  const app = await Safe.initializeApp(appInfo, permissions, options)
-  const uri = await app.auth.genAuthUri({})
 
-  debug('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo))
+  const app = await Safe.initializeApp(appInfo, undefined, options)
+  const uri = await app.auth.genAuthUri(appContainers, containerOpts)
+
+  debug('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo) +
+    'appContainers: ' + JSON.stringify(appContainers))
   await app.auth.openUri(uri.uri)
+  debug('wait a mo')
 }
 
 async function ipcReceive (id) {
