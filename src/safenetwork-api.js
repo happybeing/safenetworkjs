@@ -34,6 +34,15 @@ const fakeGetattr = {
   '/_public/happybeing': 'file'
 }
 
+const rootContainerNames = [
+  '_public',
+  '_documents',
+  '_music',
+  '_video',
+  '_photos',
+  '_publicNames'
+]
+
 /*
 * SafenetworkJS - Application API for SAFE Network (base level)
 *
@@ -260,6 +269,8 @@ class SafenetworkApi {
 
     this.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
     this.SN_SERVICEID_LDP = SN_SERVICEID_LDP
+
+    this.rootContainerNames = rootContainerNames
   }
 
   /*
@@ -307,7 +318,6 @@ class SafenetworkApi {
   isAuthorised () { return this._isAuthorised }
   services () { return this._availableServices }  // Note: these are ServiceInterface rather than ServiceContainer
 
-
   // Read only connection with SAFE network (can authorise later)
   //
   // Before you can use the SafenetworkApi methods, you must init and connect
@@ -332,9 +342,9 @@ class SafenetworkApi {
       // DEBUG CODE
       logApi('DEBUG WARNING using connectAuthorised() NOT connect()')
       let debugConfig = {
-        id:     "com.happybeing.plume.poc",
-        name:   "SAFE Plume (PoC)",
-        vendor: "com.happybeing"
+        id: 'com.happybeing.plume.poc',
+        name: 'SAFE Plume (PoC)',
+        vendor: 'com.happybeing'
       }
       return this.simpleAuthorise(debugConfig, defaultPerms)
     }
@@ -454,10 +464,10 @@ class SafenetworkApi {
   async getRootContainer (containerName) {
     let container = this._rootContainers[containerName]
     if (!container) {
-      containerClass = containerClasses[containerName]
-      if (containerClass) {
-        container = new containerClass(this, containerName)
-        container.intitialise().then( (result) => {
+      let ContainerClass = containerClasses[containerName]
+      if (ContainerClass) {
+        container = new ContainerClass(this, containerName)
+        container.initialise().then((result) => {
           this._rootContainers[containerName] = container
         })
       }
@@ -668,7 +678,6 @@ class SafenetworkApi {
       }
 
       createResult = await this._createPublicName(publicName)
-      let servicesMd = createResult.servicesMd
 
       let host = publicName
       if (hostProfile !== undefined && hostProfile !== '') { host = hostProfile + '.' + publicName }
@@ -705,8 +714,7 @@ class SafenetworkApi {
     logApi('createPublicName(%s)...', publicName)
     try {
       let createResult = await this._createPublicName(publicName)
-      let servicesMd = await createResult.servicesMd
-      delete createResult.servicesMd
+      delete await createResult.servicesMd
     } catch (err) {
       logApi('Unable to create public name \'' + publicName + '\': ', err)
       throw err
@@ -725,13 +733,13 @@ class SafenetworkApi {
   async createNfsContainerMd (rootContainer, publicName, containerName, mdTagType, isPrivate) {
     logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', rootContainer, publicName, containerName, mdTagType, isPrivate)
     try {
-      let ownerPart = ( publicName !== '' ? '/' + publicName : '' ) // Usually a folder is associated with a service on a public name
+      let ownerPart = (publicName !== '' ? '/' + publicName : '') // Usually a folder is associated with a service on a public name
+      let rootKey = rootContainer + '/' + ownerPart + '/' + containerName
 
       let rootMd
       if (rootContainer !== '') {
         // Check the container does not yet exist
         rootMd = await this.auth.getContainer(this.safeApp, rootContainer)
-        let rootKey = rootContainer + '/' + ownerPart + '/' + containerName
 
         // Check the public container doesn't already exist
         let existingValue = null
@@ -1894,11 +1902,13 @@ class SafeServiceLDP extends ServiceInterface {
         if (response.status >= 200 && response.status < 300) {
           let fileInfo = await this._getFileInfo(pathpart(docUri))
           var etagWithoutQuotes = (typeof (fileInfo.ETag) === 'string' ? fileInfo.ETag : undefined)
-          let res = new Response(null,{status: 200, headers: new Headers({
-            Location: docUri,
-            'contentType': contentType,
-            revision: etagWithoutQuotes,
-            'MS-Author-Via': 'SPARQL'})
+          let res = new Response(null, {
+            status: 200, headers: new Headers({
+              Location: docUri,
+              'contentType': contentType,
+              revision: etagWithoutQuotes,
+              'MS-Author-Via': 'SPARQL'
+            })
           })
           this.addHeaderLinks(docUri, options, res.headers)
           return res
@@ -2589,7 +2599,7 @@ class PublicContainer {
       throw new Error('Invalid PublicContainer name:' + this._name)
     }
 
-    this._mData = this._safeJs.auth().getContainer(this._name)
+    this._mData = this._safeJs.auth.getContainer(this._name)
     return this._mData
   }
 
@@ -2601,6 +2611,10 @@ class PublicContainer {
 
   }
 
+  async listFolder (folderPath) {
+    return ['this', 'is', 'a', 'listing', 'for', 'PublicContainer.listFolder(' + folderPath + ')']
+  }
+
   /**
    * Get the MutableData entry for entryKey
    * @param  {String}         entryKey
@@ -2609,6 +2623,26 @@ class PublicContainer {
   async getEntry (entryKey) {
     // TODO
   }
+
+   /*
+   *  Fuse style operations
+   *
+   * These are used one-for-one to implement FUSE operations in safenetwork-fuse
+   */
+  async readdir (itemPath) { debug('PublicContainer readdir(' + itemPath + ')'); return this.listFolder(itemPath) }
+  async mkdir (itemPath) { debug('TODO PublicContainer mkdir(' + itemPath + ') not implemented'); return {} }
+  async statfs (itemPath) { debug('TODO PublicContainer statfs(' + itemPath + ') not implemented'); return {} }
+  async getattr (itemPath) { debug('TODO PublicContainer getattr(' + itemPath + ') not implemented'); return {} }
+  async create (itemPath) { debug('TODO PublicContainer create(' + itemPath + ') not implemented'); return {} }
+  async open (itemPath) { debug('TODO PublicContainer open(' + itemPath + ') not implemented'); return {} }
+  async write (itemPath) { debug('TODO PublicContainer write(' + itemPath + ') not implemented'); return {} }
+  async read (itemPath) { debug('TODO PublicContainer read(' + itemPath + ') not implemented'); return {} }
+  async unlink (itemPath) { debug('TODO PublicContainer unlink(' + itemPath + ') not implemented'); return {} }
+  async rmdir (itemPath) { debug('TODO PublicContainer rmdir(' + itemPath + ') not implemented'); return {} }
+  async rename (itemPath) { debug('TODO PublicContainer rename(' + itemPath + ') not implemented'); return {} }
+  async ftruncate (itemPath) { debug('TODO PublicContainer ftruncate(' + itemPath + ') not implemented'); return {} }
+  async mknod (itemPath) { debug('TODO PublicContainer mknod(' + itemPath + ') not implemented'); return {} }
+  async utimens (itemPath) { debug('TODO PublicContainer utimens(' + itemPath + ') not implemented'); return {} }
 }
 
 /**
@@ -2861,6 +2895,9 @@ module.exports = SafenetworkApi
 module.exports.RootContainer = PublicContainer
 module.exports.ServicesContainer = ServicesContainer
 module.exports.NfsContainer = NfsContainer
+
+// Constants
+module.exports.rootContainerNames = rootContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
 
 // TODO ??? change to export class, something like this (example rdflib Fetcher.js)
 // class SafenetworkApi {...}
