@@ -1,20 +1,31 @@
 /* TODO theWebalyst:
+[ ] implement JSDocs or similar across the code
 [/] npm link for development of safenetwork-fuse
 [x] get simple auth working so safenetwork-fuse auths with mock
   -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setApp()
 [ ] migrate features from safenetwork-webapi to:
-[ ] SAFE Application API (safenetwork-api.js this file!)
-[ ] SAFE FS API (safenetwork-fs.js)
+[ ] Review features and files, perhaps:
+  [ ] safenetwork-api.js App auth, access to features (SAFE API, NFS, services etc.)
+  [ ] safe-services.js specialist SAFE and generic RESTful services for web app *and* desktop (both via fetch()
+  [ ] safe-containers.js wrappers for root containers with simplified JSON file
+      system like interface for each:
+    [ ] SafeContainer
+    [ ]   PublicContainer (_public)
+    [ ]     ServicesContainer
+    [ ]   PrivateContainer (_music)
+    [ ]     PublicNamesContainer (_publicNames)
+    [ ]   NfsContainer
+    [ ] put FUSE ops on the above for now, but later:
+      [ ] if poss. move the FUSE ops back into the safenetwork-fuse
+          handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
 [ ] change to generic JSON interface
-[ ] SAFE Web API (safenetwork-web/ safenetwork-webapi.js + safenetwork-webservices.js)
-[ ] change to generic JSON interface
-[ ] re-organise APIs: App/FS and Web/WebServices (as two npm modules)
 [ ] move the 'safenetworkjs and safenetwork-web' notes to README.md of both modules
-[ ] maybe I can merge these and just have a build script for the web version? (get working separately first I think)
-[ ] to handle different SAFE auth/response in same module:
-[ ] move safe-cli-boilerplate bootstrap() into safenetworkjs
-[ ] write an equivalent for use in web
-[ ] modify my SafenetworkApi authorise methods to select between the two
+[ ] get SafenetworkJs working for both desktop and web app
+  [/] move safe-cli-boilerplate bootstrap() into safenetworkjs
+  [ ] write an equivalent for use in web
+  [ ] handle different SAFE auth/response in same module
+  -> it's looking like one module could be used for both (no build needed)
+  [ ] modify my SafenetworkApi authorise methods to select between the two
 */
 
 // TODO remove this
