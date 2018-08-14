@@ -8,6 +8,8 @@
  *      NfsContainer
  */
 
+require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
+
 const debug = require('debug')('safenetworkjs:container')  // Web API
 const path = require('path')
 
@@ -41,9 +43,6 @@ class SafeContainer {
     this._name = containerName
   }
 
-  isPublic () { return true }
-  isSelf (itemPath) { return this._name.indexOf(itemPath.substr(1)) }
-
   /**
    * Initialise by accessing the container MutableData
    * @return {Promise} the MutableData for this container
@@ -60,6 +59,44 @@ class SafeContainer {
       debug(msg + '\n' + error.stack)
       throw new Error(msg)
     })
+  }
+
+  isPublic () { return true }
+  isSelf (itemPath) { return this._name.indexOf(itemPath.substr(1)) === 0 }
+
+  async updateMetadata () {
+    try {
+      this._metadata = {
+        size: 1024 * 1024,  // TODO get from SAFE contants?
+        version: await this._mData.getVersion()
+      }
+      return this._metadata
+    } catch (e) { debug(e.message) }
+  }
+
+  async nfs () {
+    if (!this._nfs) this._nfs = this._mData.emulateAs('NFS')
+    return this._nfs
+  }
+
+  async getEntryValue (key) {
+    try {
+      return await this._safeJs.getMutableDataValue(this._mData, key)
+    } catch (e) { debug(e.message) }
+  }
+
+  async getEntryAsFile (key) {
+    try {
+      let value = await this.getEntryValue(key)
+      return this.nfs().fetch(value)
+    } catch (e) { debug(e.message) }
+  }
+
+  async getEntryAsNfsContainer (key) {
+    try {
+      let value = await this.getEntryValue(key)
+      return this._safeJs.getNfsContainer(value, false, this.isPublic(), this)
+    } catch (e) { debug(e.message) }
   }
 
   async createNfsFolder (folderPath) {
@@ -118,9 +155,71 @@ class SafeContainer {
     }
   }
 
+  /**
+   * Get the type of the entry as one of:
+   *  self            itemPath isn't an entry but the name of this container TODO what if a key matches this? :-/
+   *  nfs-container   itemPath matches an entry and ends with slash
+   *  file            itemPath matches an entry and doesn't end with slash
+   *  fake-contatiner itemPath doesn't match a key (default is we fake attributes of a container)
+   *
+   * @param  {String} itemPath A partial or full key within the container Mutable Data
+   * @return {String}          The type of this entry
+   */
+  itemType (itemPath) {
+    let type = 'fake-container'
+    let value = this.getEntryValue(itemPath)
+    if (value) {
+      type = (itemPath.substr(-1) === '/' ? 'nfs-container' : 'file')
+    } else if (this.isSelf(itemPath)) {
+      type = 'self'
+    } else {
+      let msg = 'Failed to determine itemType for: ' + itemPath
+      debug(msg)
+      throw new Error(msg)
+    }
+    return type
+  }
+
   async itemAttributes (itemPath) {
     debug('itemInfo(%s)', itemPath)
-    return { isFile: (!this.isSelf(itemPath) || itemPath.substr(-1) === path.sep) }
+    const now = Date.now()
+    try {
+      let type = this.itemType(itemPath)
+      if (type === 'file') {
+        let file = await this.getEntryAsFile(itemPath)
+        return {
+          modified: file.modified,
+          accessed: now,
+          created: file.created,
+          size: file.size,
+          version: file.version,
+          'isFile': true,
+          entryType: type
+        }
+      } else {
+        // Default values (used as is for 'fake-container')
+        let attributes = {
+          mtime: now,
+          atime: now,
+          ctime: now,
+          size: 0,
+          version: -1,
+          'isFile': false,
+          entryType: type
+        }
+
+        let container = this
+        if (type !== 'self') {
+          container = await this.getEntryAsNfsContainer(itemPath)
+        }
+        await container.updateMetadata()
+        attributes.size = container.size
+        attributes.version = container.version
+        return attributes
+      }
+    } catch (e) {
+      debug(e.message)
+    }
   }
 
   /**
@@ -397,3 +496,4 @@ const containerClasses = {
 module.exports.rootContainerNames = rootContainerNames
 module.exports.containerClasses = containerClasses
 module.exports.PublicContainer = PublicContainer
+module.exports.NfsContainer = NfsContainer

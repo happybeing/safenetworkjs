@@ -10,8 +10,13 @@
   [ ] safe-containers.js wrappers for root containers with simplified JSON file
       system like interface for each:
     [ ] SafeContainer
-    [ ]   PublicContainer (_public)
-    [ ]   PrivateContainer (_music)
+      [ ] Using Safepress2press a/c:
+          - First _public entry is /remotestorage/documents/notes/517F2A9F-5409-49B7-8714-1209B3DE3834
+--------->[ ] BUG It trys getattr on _public/documents not _public/remotestorage
+          [/] BUG Need to detect pseudo folder /remotestorage etc and handle different from the full entry
+              could just have defaults for when I getEntryValue() fails
+    [/]   PublicContainer (_public)
+    [/]   PrivateContainer (_music)
     [ ]     PublicNamesContainer (_publicNames)
     [ ]   ServicesContainer
     [ ]   NfsContainer
@@ -28,8 +33,6 @@
   [ ] modify my SafenetworkApi authorise methods to select between the two
   [ ] update safe-cli-boilerplate to use SafenetworkJs bootstrap.js (as safenetwork-fuse now does)
 */
-
-const containers = require('./safe-containers')
 
 /*
 * SafenetworkJS - Application API for SAFE Network (base level)
@@ -89,6 +92,22 @@ Features generic JSON i/f for:
 
 */
 
+require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
+
+// Local
+const containers = require('./safe-containers')
+const NfsContainer = containers.NfsContainer
+
+// Libs
+const safeUtils = require('./safenetwork-utils')
+
+// Decorated console output
+const debug = require('debug')
+const logApi = require('debug')('safenetworkjs:web')  // Web API
+const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
+const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
+const logTest = require('debug')('safenetworkjs:test')  // Test output
+
 // TODO: when browser API matches this, add a build of safenetworkjs for web
 let safeApi
 if (typeof window !== 'undefined') {  // Browser SAFE DOM API
@@ -99,15 +118,6 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
 } else {                              // SAFE App NodeJS API
   safeApi = require('./bootstrap')
 }
-
-require('fast-text-encoding') // TextEncoder, TextDecoder
-
-// Decorated console output
-const debug = require('debug')
-const logApi = require('debug')('safenetworkjs:web')  // Web API
-const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
-const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
-const logTest = require('debug')('safenetworkjs:test')  // Test output
 
 let extraDebug = false
 
@@ -124,9 +134,6 @@ const SN_SERVICEID_WWW = 'www'
 const SN_TAGTYPE_LDP = SN_TAGTYPE_WWW // Same tag type needed for all file containers (in _public etc), therefore best to make NFS rather than WWW?
 const SN_SERVICEID_LDP = 'www'  // First try 'www' to test compat with other apps (eg Web Hosting Manager)
 // TODO then try out 'ldp'
-
-// Libs
-const safeUtils = require('./safenetwork-utils')
 
 /* eslint-disable no-unused-vars */
 const isFolder = safeUtils.isFolder
@@ -481,7 +488,7 @@ class SafenetworkApi {
       container = new ServicesContainer(this, publicName)
       container.intitialise(createNew).then(() => {
         this._servicesContainers[publicName] = container
-      })
+      }).catch((e) => { debug(e.message) })
     }
 
     return container
@@ -505,11 +512,11 @@ class SafenetworkApi {
         let ownerName = ''  // Not known (typically a public name so this is just omitted)
         container.createNew(ownerName, isPublic).then(() => {
           this._nfsContainers[nameOrKey] = container
-        })
+        }).catch((e) => { debug(e.message) })
       } else {
         container.initialiseExisting().then(() => {
           this._nfsContainers[nameOrKey] = container
-        })
+        }).catch((e) => { debug(e.message) })
       }
     }
 
@@ -531,12 +538,12 @@ class SafenetworkApi {
   // @param key the key to read
   //
   // @returns a Promise which resolves to a ValueVersion
-  async getMutableDataValue (mdHandle, key) {
-    logApi('getMutableDataValue(%s,%s)...', mdHandle, key)
-    let useKey = await this.mutableData.encryptKey(mdHandle, key)
+  async getMutableDataValue (mData, key) {
+    logApi('getMutableDataValue(%s,%s)...', mData, key)
+    let useKey = await mData.encryptKey(key)
     try {
-      let valueVersion = await this.mutableData.get(mdHandle, useKey)
-      valueVersion.buf = this.mutableData.decrypt(mdHandle, valueVersion.buf)
+      let valueVersion = await mData.get(useKey)
+      valueVersion.buf = mData.decrypt(valueVersion.buf)
       return valueVersion
     } catch (err) {
       logApi("getMutableDataValue() WARNING no entry found for key '%s'", key)
@@ -553,42 +560,43 @@ class SafenetworkApi {
   // - if the MD is public, they do nothing
   // - if the MD is private, they encrypt/decrypt using the MD private key
   //
-  // @param mdHandle
+  // @param mData
   // @param key
   // @param value
   // @param mustNotExist  [defaults to false] if true, will fail if the key exists in the MD object
   //
   // @returns a Promise which resolves true if successful
-  async setMutableDataValue (mdHandle, key, value, mustNotExist) {
+  async setMutableDataValue (mData, key, value, mustNotExist) {
     if (mustNotExist === undefined) {
       mustNotExist = true
     }
 
-    logApi('setMutableDataValue(%s,%s,%s,%s)...', mdHandle, key, value, mustNotExist)
+    logApi('setMutableDataValue(%s,%s,%s,%s)...', mData, key, value, mustNotExist)
     let entry = null
     try {
       // Check for an existing entry
       try {
-        let encryptedKey = await this.mutableData.encryptKey(mdHandle, key)
-        entry = await this.mutableData.get(mdHandle, encryptedKey)
+        let encryptedKey = await mData.encryptKey(key)
+        entry = await mData.get(encryptedKey)
       } catch (err) {}
 
       if (entry && mustNotExist) {
         throw new Error("Key '" + key + "' already exists")
       }
 
-      let mutationHandle = await this.mutableData.newMutation(this.safeApp)
+      let entries = await mData.getEntries()
+      let mutation = await entries.mutate()
 
       // Note: these only encrypt if the MD is private
-      let useKey = await this.mutableData.encryptKey(mdHandle, key)
-      let useValue = await this.mutableData.encryptValue(mdHandle, value)
+      let useKey = await mData.encryptKey(key)
+      let useValue = await mData.encryptValue(value)
       if (entry) {
-        await this.mutableDataMutation.update(mutationHandle, useKey, useValue.version + 1)
+        await mutation.update(useKey, useValue.version + 1)
       } else {
-        await this.mutableDataMutation.insert(mutationHandle, useKey, useValue)
+        await mutation.insert(useKey, useValue)
       }
 
-      await this.mutableData.applyEntriesMutation(mdHandle, mutationHandle)
+      await mData.applyEntriesMutation(mutation)
       logApi('Mutable Data Entry %s', (mustNotExist ? 'inserted' : 'updated'))
       return true
     } catch (err) {
