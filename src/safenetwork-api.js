@@ -11,9 +11,9 @@
       system like interface for each:
     [ ] SafeContainer
     [ ]   PublicContainer (_public)
-    [ ]     ServicesContainer
     [ ]   PrivateContainer (_music)
     [ ]     PublicNamesContainer (_publicNames)
+    [ ]   ServicesContainer
     [ ]   NfsContainer
     [ ] put FUSE ops on the above for now, but later:
       [ ] if poss. move the FUSE ops back into the safenetwork-fuse
@@ -26,33 +26,10 @@
   [ ] handle different SAFE auth/response in same module
   -> it's looking like one module could be used for both (no build needed)
   [ ] modify my SafenetworkApi authorise methods to select between the two
+  [ ] update safe-cli-boilerplate to use SafenetworkJs bootstrap.js (as safenetwork-fuse now does)
 */
 
-// TODO remove this
-const fakeReadDir = {
-  '/': ['_public', 'two', 'three'],
-  '/_public': ['four', 'five', 'happybeing']
-}
-
-// TODO remove this
-const fakeGetattr = {
-  '/': 'directory',
-  '/_public': 'directory',
-  '/two': 'file',
-  '/three': 'file',
-  '/_public/four': 'file',
-  '/_public/five': 'file',
-  '/_public/happybeing': 'file'
-}
-
-const rootContainerNames = [
-  '_public',
-  '_documents',
-  '_music',
-  '_video',
-  '_photos',
-  '_publicNames'
-]
+const containers = require('./safe-containers')
 
 /*
 * SafenetworkJS - Application API for SAFE Network (base level)
@@ -264,7 +241,7 @@ class SafenetworkApi {
     this._authOnAccessDenied = false  // Used by simpleAuthorise() and fetch()
 
     // Cached API Objects
-    this._rootContainers = {} // Active RootContainer objects
+    this._rootContainers = {} // Active SafeContainer objects
     this._nfsContainers = {}    // Active NfsContainer objects
 
     // Application specific configuration required for authorisation
@@ -284,7 +261,7 @@ class SafenetworkApi {
     this.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
     this.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
-    this.rootContainerNames = rootContainerNames
+    this.rootContainerNames = containers.rootContainerNames
   }
 
   /*
@@ -461,6 +438,8 @@ class SafenetworkApi {
    *  PublicContainer for _public
    *  PrivateContainer for _documents, _music etc
    *  PublicNamesContainer for _publicNames
+   *  NfsContainer for an NFS emultation Mutable Data
+   *  ServicesContainer for a services Mutable Data
    *
    * In addition to the root containers, ServicesContainer simplifies
    * creation and management of SAFE services Mutable Data (but not yet
@@ -472,13 +451,13 @@ class SafenetworkApi {
   /**
    * Get an initialised root container instance
    * @param  {String} containerName Name of a root container (e.g. '_public')
-   * @return {Object}               initialised instance of RootContainer
+   * @return {Object}               initialised instance of SafeContainer
    */
 
-  async getRootContainer (containerName) {
+  async getSafeContainer (containerName) {
     let container = this._rootContainers[containerName]
     if (!container) {
-      let ContainerClass = containerClasses[containerName]
+      let ContainerClass = containers.containerClasses[containerName]
       if (ContainerClass) {
         container = new ContainerClass(this, containerName)
         container.initialise().then((result) => {
@@ -513,7 +492,7 @@ class SafenetworkApi {
    * @param {String} nameOrKey  Either the path (starting with a public container) or the XOR address
    * @param  {Boolean}  createNew (optional) true if you want to create a new NFS MutableData
    * @param  {Boolean}  isPublic (optional) if createNew, specify true to make it shareable (eg in _public)
-   * @param {Object} parent (optional) typically a RootContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
+   * @param {Object} parent (optional) typically a SafeContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
    * @return {Object}               initialised instance of NfsContainer
    */
   async getNfsContainer (nameOrKey, createNew, isPublic, parent) {
@@ -1590,7 +1569,7 @@ class SafeServiceWww extends ServiceInterface {
       // Service Setup - configures behaviour of setupServiceForHost()
       setupDefaults: {
         setupNfsContainer: true,        // Automatically create a file store for this host
-        defaultRootContainer: '_public',  // ...in container (e.g. _public, _documents, _pictures etc.)
+        defaultSafeContainer: '_public',  // ...in container (e.g. _public, _documents, _pictures etc.)
         defaultContainerName: 'root-' + SN_SERVICEID_WWW // ...container key: 'root-www' implies key of '_public/<public-name>/root-www'
       },
 
@@ -1691,7 +1670,7 @@ class SafeServiceLDP extends ServiceInterface {
       // Service Setup - configures behaviour of setupServiceForHost()
       setupDefaults: {
         setupNfsContainer: true,        // Automatically create a file store for this host
-        defaultRootContainer: '_public',  // ...in container (e.g. _public, _documents, _pictures etc.)
+        defaultSafeContainer: '_public',  // ...in container (e.g. _public, _documents, _pictures etc.)
         defaultContainerName: 'root-' + SN_SERVICEID_LDP // ...container key: 'root-www' implies key of '_public/<public-name>/root-www'
       },
 
@@ -1777,7 +1756,7 @@ class SafeServiceLDP extends ServiceInterface {
     let serviceValue = ''   // Default is do nothing
     let setup = this.getServiceConfig().setupDefaults
     if (setup.setupNfsContainer) {
-      let nameAndTag = await this.safeWeb().createNfsContainerMd(setup.defaultRootContainer, publicName, setup.defaultContainerName, this.getTagType())
+      let nameAndTag = await this.safeWeb().createNfsContainerMd(setup.defaultSafeContainer, publicName, setup.defaultContainerName, this.getTagType())
 
       serviceValue = nameAndTag.name.buffer
       await this.safeWeb().setMutableDataValue(servicesMd, serviceKey, serviceValue)
@@ -2596,385 +2575,17 @@ const ns = require('solid-namespace')($rdf)
   }
 }
 
-// TODO move these classes to their own files
-
-/**
- * Wrapper for public root container (_public)
- *
- * Currently supports _public
- */
-class PublicContainer {
-  /**
-   * @param {Object} safeJs  SafenetworkApi (owner)
-   * @param {String} containerName (optional) defaults to '_public'
-   */
-  constructor (safeJs, containerName) {
-    this._safeJs = safeJs       // SafenetworkJs instance
-    this._name = (containerName !== undefined ? containerName : '_public')
-  }
-
-  isPublic () { return true }
-  isSelf (itemPath) { return this._name.indexOf(itemPath.substr(1)) }
-
-  /**
-   * Initialise by accessing the container MutableData
-   * @return {Promise} the MutableData for this container
-   */
-  async initialise () {
-    if (containerClasses[this._name] !== PublicContainer) {
-      throw new Error('Invalid PublicContainer name:' + this._name)
-    }
-
-    return this._safeJs.auth.getContainer(this._name).then((mData) => {
-      this._mData = mData
-    }).catch((error) => {
-      let msg = 'PublicContainer initialise failed to get container: ' + this._name + ' (' + error.message + ')'
-      debug(msg + '\n' + error.stack)
-      throw new Error(msg)
-    })
-  }
-
-  async createNfsFolder (folderPath) {
-    debug('createNfsFolder(%s)', folderPath)
-  }
-
-  async insertNfsFolder (nfsFolder) {
-
-  }
-
-  async listFolder (folderPath) {
-    debug('listFolder(%s)', folderPath)
-    let name = 'XXX' // TODO remove debug calls (and comment out the value parts until moved elsewhere)
-    let listing = []
-    let entries = await this._mData.getEntries()
-    await entries.forEach(async (k, v) => {
-      let plainValue = v.buf
-      try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
-
-      let enc = new TextDecoder()
-      let plainKey = enc.decode(new Uint8Array(k))
-      if (plainKey !== k.toString())
-        debug('%s Key (encrypted): ', name, k.toString())
-
-        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
-      debug('%s Key            : ', name, plainKey)
-
-      plainValue = enc.decode(new Uint8Array(plainValue))
-      if (plainValue !== v.buf.toString())
-        debug('%s Value (encrypted): ', name, v.buf.toString())
-
-      debug('%s Value            :', name, plainValue)
-
-      debug('%s Version: ', name, v.version)
-
-      // For any key that is longer than folderPath get the 'contained' item
-      let remainder = plainKey.substr(folderPath.length)
-      remainder = remainder.split(path.sep)[1]
-      if (remainder.length && listing.indexOf(remainder) === -1) {
-        listing.push(remainder)
-      }
-    })
-
-    return listing
-  }
-
-  async itemInfo (itemPath) {
-    debug('itemInfo(%s)', itemPath)
-    if (this.isSelf(itemPath)) {
-      return this._safeJs.mutableDataStats(this._mData)
-    } else {
-      return this._safeJs.mutableDataStats(this._mData) // TODO replace with info for the entry
-    }
-  }
-
-  async itemAttributes (itemPath) {
-    debug('itemInfo(%s)', itemPath)
-    return { isFile: (!this.isSelf(itemPath) || itemPath.substr(-1) === path.sep) }
-  }
-
-  /**
-   * Get the MutableData entry for entryKey
-   * @param  {String}         entryKey
-   * @return {Promise}        resolves to ValueVersion
-   */
-  async getEntry (entryKey) {
-    // TODO
-  }
-
-   /*
-   *  Fuse style operations
-   *
-   * These are used one-for-one to implement FUSE operations in safenetwork-fuse
-   */
-  async readdir (itemPath) { debug('PublicContainer readdir(' + itemPath + ')'); return this.listFolder(itemPath) }
-  async mkdir (itemPath) { debug('TODO PublicContainer mkdir(' + itemPath + ') not implemented'); return {} }
-  async statfs (itemPath) { debug('PublicContainer statfs(' + itemPath + ')'); return this.itemInfo(itemPath) }
-  async getattr (itemPath) { debug('PublicContainer getattr(' + itemPath + ')'); return this.itemAttributes(itemPath) }
-  async create (itemPath) { debug('TODO PublicContainer create(' + itemPath + ') not implemented'); return {} }
-  async open (itemPath) { debug('TODO PublicContainer open(' + itemPath + ') not implemented'); return {} }
-  async write (itemPath) { debug('TODO PublicContainer write(' + itemPath + ') not implemented'); return {} }
-  async read (itemPath) { debug('TODO PublicContainer read(' + itemPath + ') not implemented'); return {} }
-  async unlink (itemPath) { debug('TODO PublicContainer unlink(' + itemPath + ') not implemented'); return {} }
-  async rmdir (itemPath) { debug('TODO PublicContainer rmdir(' + itemPath + ') not implemented'); return {} }
-  async rename (itemPath) { debug('TODO PublicContainer rename(' + itemPath + ') not implemented'); return {} }
-  async ftruncate (itemPath) { debug('TODO PublicContainer ftruncate(' + itemPath + ') not implemented'); return {} }
-  async mknod (itemPath) { debug('TODO PublicContainer mknod(' + itemPath + ') not implemented'); return {} }
-  async utimens (itemPath) { debug('TODO PublicContainer utimens(' + itemPath + ') not implemented'); return {} }
-}
-
-/**
- * Wrapper for private root container such as '_documents', '_music'
- *
- * TODO implement support for private containers (_documents, _music etc)
- * TODO implement support for application own container
- */
-class PrivateContainer extends PublicContainer {
-  /**
-   * @param {Object} safeJs  SafenetworkApi (owner)
-   * @param {String} containerName Name of a private root container such as '_documents'
-   */
-  constructor (safeJs, containerName) {
-    super(safeJs, containerName)
-    this._safeJs = safeJs
-    this._containerName = containerName
-  }
-
-  isPublic () { return false }
-
-  /**
-   * Initialise by accessing the container MutableData
-   * @return {Promise} the MutableData for this container
-   */
-  // async initialise () {
-  //   return super.initialise()
-      // if (containerClasses[containerName] !== PrivateContainer) {
-      //   throw new Error('Invalid PrivateContainer name:' + containerName)
-      // }
-  // }
-
-  /**
-   * Get the MutableData entry for entryKey
-   * @param  {String}         entryKey
-   * @return {Promise}        resolves to ValueVersion
-   */
-  async getEntry (entryKey) {
-    // TODO
-  }
-}
-
-/* TODO not sure if this is best as 'extends' or a stand-alone class
-class PublicNamesContainer {
-  constructor (safeJs) {
-    if (containerClasses[containerName] !== PublicNamesContainer) {
-      throw new Error('Invalid PublicNamesContainer name:' + containerName)
-    }
-    this._safeJs = safeJs
-    this._containerName = containerName
-  }
-}
-*/
-
-/**
- * Wrapper for MutableData services container (for a public name)
- */
-class ServicesContainer {
-  /**
-   * @param {Object} safeJs  SafenetworkApi (owner)
-   * @param {String} publicName public name for which this holds services
-   */
-  constructor (safeJs, publicName) {
-    throw new Error('ServicesContainer not yet implemented')
-    this._safeJs = safeJs
-    this._name = publicName
-  }
-
-  /**
-   * Initialise by accessing services MutableData for a public name
-   * @return {Promise}
-   */
-  async initialiseExisting () {
-    this._mData = undefined // TODO
-  }
-
-  // TODO add methods to access existing service entries (e.g. enumerate, get by name)
-}
-
-/**
- * Wrapper for 'NFS' emulation MutableData
- *
- * TODO NfsContainer - implement private MD (currently only creates public MDs)
- */
-
-// NOTES:
-// The method for creating public SAFE NFS containers is not currently
-// documented by MaidSafe and is instead defined by the Web Hosting Manager
-// example, here:
-//   https://github.com/maidsafe/safe_examples/blob/master/web_hosting_manager/app/safenet_comm/api.js#L150
-//
-// In summary, when the Web Hosting Manager creates an NFS container for a www
-// service it uses newRandomPublic(CONSTANTS.TYPE_TAG.WWW) to create the MutableData
-// container, uses quickSetup to apply metadata as:
-//   const metaName = `Service Root Directory for: serviceName.publicName`;
-//   const metaDesc = `Has the files hosted for the service: serviceName.publicName`;
-//   await servFolder.quickSetup({}, metaName, metaDesc);
-// It then inserts an entry into the _public container with
-//   key:   service path, such as 'somefolder/lastfolder' (default for www service is '<public-name>/www-root')
-//   value: the XoR-name/address on the network (as a Buffer from from getNameAndTag())
-
-class NfsContainer {
-  /**
-   * [constructor description]
-   * @param {SafenetworkJs} safeJs  SafenetworkJS API object
-   * @param {String} nameOrKey  MD name, or if a parent container is given, the key of the MD entry containing the name
-   * @param {Object} parent (optional) typically a RootContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
-   * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
-   */
-  constructor (safeJs, nameOrKey, parent, isPublic) {
-    this._safeJs = safeJs
-    if (parent) {
-      this._parent = parent
-      this._entryKey = nameOrKey
-    } else {
-      this._parent = undefined
-      this._mdName = nameOrKey
-      this._isPublic = isPublic
-      this._tagType = SN_TAGTYPE_NFS
-    }
-  }
-
-  isPublic () { return this._isPublic }
-
-  /**
-   * Initialise by accessing existing MutableData compatible with NFS emulation
-   * @return {Promise}
-   */
-  async initialiseExisting () {
-    if (!this._parent) {
-      throw new Error('TODO add support for XOR nameOrKey to NfsContainer')
-    }
-
-    try {
-      if (this._parent) {
-        let valueVersion = await this._parent.getEntry(this._entryKey)
-        this._mdName = valueVersion.value
-      }
-
-      this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
-    } catch (err) {
-      let info = (this._parent ? this._parent.name + '/' + this._entryKey : this._mdName)
-      throw new Error('NfsContainer failed to init existing MD for ' + info)
-    }
-  }
-
-  /**
-   * create an NFS MutableData and insert into a parent container if present
-   * @param  {String} ownerName (optional) if provided, usually the public name on which this folder is used
-   * @param  {Boolean} isPublic (optional) if present overrides constructor
-   * @return {Promise}          a newly created {MutableData}
-   */
-  async createNew (ownerName, isPublic) {
-    if (!ownerName) ownerName = ''
-    if (!isPublic) isPublic = this._isPublic
-    let containerName = (this._parent ? this._parent._name : '')
-    return this._safeJs.createNfsContainerMd(containerName, ownerName, this._mdName, this._tagType, !isPublic)
-  }
-
-  /**
-   * create a general purpose NFS container in _public
-   * @param  {Number}  tagType         (optional) SAFE MutableData tagType
-   * @param  {String}  metaName        (optional) metadata describing what this is for
-   * @param  {String}  metaDescription (optional) metadata explaining what this contains
-   * @return {Promise}                 ???
-   */
-  // TODO create a general purpose NFS container in _public
-  async createPublicFolder (tagType, metaName, metaDescription) {
-    throw new Error('createPublicFolder() not yet implemented')
-    // if (!tagType) tagType = ???
-    // if (!metaName) metaName = ???
-    // if (!metaDescription) metaDescription = ???
-
-    // TODO
-  }
-
-  /**
-   * create an NFS container in _public for a SAFE service
-   * @param  {number}  tagType     (optional) SAFE MutableData tagType (defaults to www)
-   * @param  {String}  servicePath (optional) Defaults to <public-name>@www
-   * @param  {String}  metaFor     will be of `serviceName.publicName` format
-   * @return {Promise}             ???
-   */
-  // When to use the container classes, SafenetworkApi or ServicesInterface classes?
-  //
-  // The RootContainer, ServicesContainer, NfsContainer etc classes provide
-  // a simple API to manage the main SAFE API types and their containers, while
-  // the classes and methods which they rely on (including methods on SafenetworkApi
-  // and the ServiceInteface class) provide greater control and additional
-  // functionality such as SAFE services accessible via fetch() in web
-  // applications, and possibly also on desktop. For example, a web library which
-  // uses fetch() to access RESTful web services could be used without
-  // modification along with SafenetworkJs to access those services on
-  // SAFE Network, if implemented using a custom ServiceInterface (cf. SafeServiceLDP)
-  //
-  // So if you just want to access and create standard SAFE containers and
-  // data types such as public names or share public files and websites,
-  // the container classes are intended to do everything you might need.
-  // You can still dip into the other methods where needed.
-
-  // TODO create an NFS container in _public for a SAFE service
-  // TODO modify this to use the service classes and service configs rather than have duplicate code
-  // TODO I think servicePath might change - check status with Gabriel re my proposals
-  // TODO here: https://forum.safedev.org/t/proposals-for-restful-service-handling/1550
-  // TODO Gabriel had some responses/alternatives which I liked but can't find those.
-  async createServiceFolder (tagType, servicePath, metaFor) {
-    throw new Error('createServiceFolder() not yet implemented')
-    // if (!tagType) tagType = safeApi.CONSTANTS.TYPE_TAG.WWW
-    // if (!metaName) metaName = `Service Root Directory for: ${metaFor}`
-    // if (!metaDescription) metaDescription = `Has the files hosted for the service: ${metaFor}`
-
-    // TODO implement - see TO DO notes above
-  }
-
-  // Simple FUSE like file system API
-  async readdir (itemPath) {
-    debug('NfsContainer readdir(' + itemPath + ')')
-    return fakeReadDir[itemPath]
-  }
-
-  async mkdir (itemPath) { debug('TODO NfsContainer mkdir(' + itemPath + ') not implemented'); return {} }
-  async statfs (itemPath) { debug('TODO NfsContainer statfs(' + itemPath + ') not implemented'); return {} }
-  async getattr (itemPath) { debug('TODO NfsContainer getattr(' + itemPath + ') not implemented'); return {} }
-  async create (itemPath) { debug('TODO NfsContainer create(' + itemPath + ') not implemented'); return {} }
-  async open (itemPath) { debug('TODO NfsContainer open(' + itemPath + ') not implemented'); return {} }
-  async write (itemPath) { debug('TODO NfsContainer write(' + itemPath + ') not implemented'); return {} }
-  async read (itemPath) { debug('TODO NfsContainer read(' + itemPath + ') not implemented'); return {} }
-  async unlink (itemPath) { debug('TODO NfsContainer unlink(' + itemPath + ') not implemented'); return {} }
-  async rmdir (itemPath) { debug('TODO NfsContainer rmdir(' + itemPath + ') not implemented'); return {} }
-  async rename (itemPath) { debug('TODO NfsContainer rename(' + itemPath + ') not implemented'); return {} }
-  async ftruncate (itemPath) { debug('TODO NfsContainer ftruncate(' + itemPath + ') not implemented'); return {} }
-  async mknod (itemPath) { debug('TODO NfsContainer mknod(' + itemPath + ') not implemented'); return {} }
-  async utimens (itemPath) { debug('TODO NfsContainer utimens(' + itemPath + ') not implemented'); return {} }
-}
-
-const containerClasses = {
-  '_public': PublicContainer,
-  '_documents': PrivateContainer,
-  '_photos': PrivateContainer,
-  '_music': PrivateContainer,
-  '_video': PrivateContainer
-// TODO  '_publicNames': PublicNamesContainer
-}
-
 // Usage: create the web API and install the built in services
 // let safeWeb = new SafenetworkApi()
 
 module.exports = SafenetworkApi
 
-module.exports.RootContainer = PublicContainer
-module.exports.ServicesContainer = ServicesContainer
-module.exports.NfsContainer = NfsContainer
+module.exports.PublicContainer = containers.PublicContainer
+module.exports.ServicesContainer = containers.ServicesContainer
+module.exports.NfsContainer = containers.NfsContainer
 
 // Constants
-module.exports.rootContainerNames = rootContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
+module.exports.rootContainerNames = containers.rootContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
 
 // TODO ??? change to export class, something like this (example rdflib Fetcher.js)
 // class SafenetworkApi {...}
