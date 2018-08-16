@@ -28,6 +28,14 @@ const rootContainerNames = [
   '_publicNames'
 ]
 
+const containerTypes = {
+  self: 'self',                   // itemPath isn't an entry but the name of this container TODO what if a key matches this? :-/
+  nfsContainer: 'nfs-container',  // itemPath matches an entry and ends with slash
+  file: 'file',                   // itemPath matches an entry and doesn't end with slash
+  fakeContainer: 'fake-container', // itemPath doesn't match a key (default is we fake attributes of a container)
+  notValid: 'not-found'
+}
+
 /**
  * Base class for SAFE root containers
  *
@@ -61,6 +69,7 @@ class SafeContainer {
     })
   }
 
+  isRootContainer () { return true }
   isPublic () { return true }
   isSelf (itemPath) { return this._name.indexOf(itemPath.substr(1)) === 0 }
 
@@ -75,8 +84,13 @@ class SafeContainer {
   }
 
   async nfs () {
-    if (!this._nfs) this._nfs = this._mData.emulateAs('NFS')
-    return this._nfs
+    try {
+      if (!this._nfs) this._nfs = await this._mData.emulateAs('NFS')
+      return this._nfs
+    } catch (e) {
+      debug(e.message)
+      throw e
+    }
   }
 
   async getEntryValue (key) {
@@ -109,6 +123,18 @@ class SafeContainer {
 
   async listFolder (folderPath) {
     debug('listFolder(%s)', folderPath)
+    // In some cases the name of the container appears at the start
+    // of the key (e.g. '/_public/happybeing/root-www').
+    // In other such as an NFS container it is just the file name
+    // or possibly a path which could container directory separators
+    // such as 'index.html' or 'images/profile-picture.png'
+    // So we strip the container name if present in each case,
+    // first from folderPath
+    let folderMatch = folderPath
+    if (this.isRootContainer()) {
+      if (folderPath.indexOf('/' + this._name) === 0) folderMatch = folderPath.substr(this._name.length + 1)
+    }
+
     let listing = []
     try {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
@@ -133,16 +159,29 @@ class SafeContainer {
 
         debug('Version: ', v.version)
 
-        // For any key that is longer than folderPath get the 'contained' item
-        let remainder = plainKey.substr(folderPath.length)
-        remainder = remainder.split(path.sep)[1]
-        if (remainder && remainder.length && listing.indexOf(remainder) === -1) {
-          listing.push(remainder)
+        let itemMatch = plainKey
+        if (this.isRootContainer()) {
+          // Strip the container name from the front of the item and the folder path
+          if (itemMatch.indexOf('/' + this._name) === 0) itemMatch = itemMatch.substr(this._name.length + 1)
+        }
+
+        debug('folderPath: %s, folderMatch: %s', folderPath, folderMatch)
+        debug('plainKey: %s \nitemMatch: %s', plainKey, itemMatch)
+
+        // Check it the folderMatch contains the itemMatch
+        if (itemMatch.indexOf(folderMatch) === 0) {
+          // Item is the first part of the path after the folder (plus a '/')
+          let item = itemMatch.substr(folderMatch.length + 1).split(path.sep)[0]
+          if (item && item.length && listing.indexOf(item) === -1) {
+            debug('push(\'%s\')', item)
+            listing.push(item)
+          }
         }
       }).catch((e) => { debug(e.message) })
     } catch (e) {
       debug(e.message)
     }
+    debug('listing: %o', listing)
     return listing
   }
 
@@ -156,36 +195,92 @@ class SafeContainer {
   }
 
   /**
-   * Get the type of the entry as one of:
-   *  self            itemPath isn't an entry but the name of this container TODO what if a key matches this? :-/
-   *  nfs-container   itemPath matches an entry and ends with slash
-   *  file            itemPath matches an entry and doesn't end with slash
-   *  fake-contatiner itemPath doesn't match a key (default is we fake attributes of a container)
+   * Get the type of the entry as one of containerTypes values
    *
    * @param  {String} itemPath A partial or full key within the container Mutable Data
-   * @return {String}          The type of this entry
+   * @return {String}          A containerTypes value
    */
-  itemType (itemPath) {
-    let type = 'fake-container'
-    let value = this.getEntryValue(itemPath)
+
+  async itemType (itemPath) {
+    let type = containerTypes.nfsContainer
+    let value = await this.getEntryValue(itemPath)
     if (value) {
-      type = (itemPath.substr(-1) === '/' ? 'nfs-container' : 'file')
+      type = (itemPath.substr(-1) === '/' ? containerTypes.nfsContainer : containerTypes.file)
     } else if (this.isSelf(itemPath)) {
-      type = 'self'
+      type = containerTypes.self
+    } else if (this.itemMatchesKeyPath(itemPath)) {
+      type = containerTypes.fakeContainer
     } else {
-      let msg = 'Failed to determine itemType for: ' + itemPath
+      let msg = 'file does not exist'
       debug(msg)
       throw new Error(msg)
     }
     return type
   }
 
+  // Check if itemPath is a valid part of the path of any key
+  // TODO this is probably horribly inefficient
+  async itemMatchesKeyPath (itemPath) {
+    debug('itemMatchesKeyPath(%s)', itemPath)
+
+    if (this.isRootContainer()) {
+      // If present, strip the container name from the front of the itemPath ready to match entry keys below
+      if (itemPath.indexOf('/' + this._name) === 0) itemPath = itemPath.substr(this._name.length + 1)
+    }
+    debug('Matching path: ', itemPath)
+
+    let matched = false
+    let entries = await this._mData.getEntries()
+    await entries.forEach(async (k, v) => {
+      if (matched) return true
+
+      let enc = new TextDecoder()
+      let plainKey = enc.decode(new Uint8Array(k))
+      if (plainKey !== k.toString())
+        debug('Key (encrypted): ', k.toString())
+
+      if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
+      debug('Key            : ', plainKey)
+
+      let itemMatch = plainKey
+      if (this.isRootContainer()) {
+        // If present, strip the container name from the front of the key (as already done for itemPath)
+        if (itemMatch.indexOf('/' + this._name) === 0) itemMatch = itemMatch.substr(this._name.length + 1)
+      }
+      debug('Matching against: ', itemMatch)
+
+      if (itemMatch.indexOf(itemPath) === 0 && itemMatch.substr(itemPath.length, 1) === '/') {
+        debug('MATCHED: ', plainKey)
+        matched = true
+      }
+    }).catch((e) => { debug(e.message) })
+
+    if (!matched) debug('NO MATCH')
+
+    return matched
+  }
+
   async itemAttributes (itemPath) {
-    debug('itemInfo(%s)', itemPath)
+    debug('itemAttributes(%s)', itemPath)
     const now = Date.now()
     try {
-      let type = this.itemType(itemPath)
-      if (type === 'file') {
+      if (this.isSelf(itemPath)) {
+        debug('%s is type: %s', itemPath, containerTypes.self)
+        return {
+          // TODO improve this if SAFE accounts ever have suitable values for size etc:
+          modified: now,
+          accessed: now,
+          created: now,
+          size: 0,
+          version: -1,
+          'isFile': false,
+          entryType: containerTypes.self
+        }
+      }
+
+      let type = await this.itemType(itemPath)
+      if (type === containerTypes.file) {
+        debug('%s is type: %s', itemPath, containerTypes[type])
         let file = await this.getEntryAsFile(itemPath)
         return {
           modified: file.modified,
@@ -197,7 +292,8 @@ class SafeContainer {
           entryType: type
         }
       } else {
-        // Default values (used as is for 'fake-container')
+        debug('%s is type: %s', itemPath, containerTypes[type])
+        // Default values (used as is for containerTypes.nfsContainer)
         let attributes = {
           mtime: now,
           atime: now,
@@ -208,13 +304,15 @@ class SafeContainer {
           entryType: type
         }
 
-        let container = this
-        if (type !== 'self') {
-          container = await this.getEntryAsNfsContainer(itemPath)
+        if (type === containerTypes.self || type === containerTypes.nfsContainer) {
+          let container = this
+          if (type !== containerTypes.self) {
+            container = await this.getEntryAsNfsContainer(itemPath)
+          }
+          await container.updateMetadata()
+          attributes.size = container.size
+          attributes.version = container.version
         }
-        await container.updateMetadata()
-        attributes.size = container.size
-        attributes.version = container.version
         return attributes
       }
     } catch (e) {
@@ -258,7 +356,6 @@ class SafeContainer {
  * @extends SafeContainer
  */
 class PublicContainer extends SafeContainer {
-
   /**
    * @param {Object} safeJs  SafenetworkApi (owner)
    */
@@ -286,7 +383,6 @@ class PrivateContainer extends SafeContainer {
   }
 
   isPublic () { return false }
-
 }
 
 /* TODO not sure if this is best as 'extends' or a stand-alone class
@@ -312,6 +408,8 @@ class ServicesContainer extends SafeContainer {
   constructor (safeJs, publicName) {
     throw new Error('ServicesContainer not yet implemented')
   }
+
+  isRootContainer () { return false }
 
   /**
    * Initialise by accessing services MutableData for a public name
@@ -356,7 +454,7 @@ class NfsContainer extends SafeContainer {
    * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
    */
   constructor (safeJs, nameOrKey, parent, isPublic) {
-    supert(safeJs, nameOrKey)
+    super(safeJs, nameOrKey)
     if (parent) {
       this._parent = parent
       this._entryKey = nameOrKey
@@ -364,10 +462,11 @@ class NfsContainer extends SafeContainer {
       this._parent = undefined
       this._mdName = nameOrKey
       this._isPublic = isPublic
-      this._tagType = SN_TAGTYPE_NFS
+      this._tagType = safeJs.SN_TAGTYPE_NFS
     }
   }
 
+  isRootContainer () { return false }
   isPublic () { return this._isPublic }
 
   /**
@@ -494,6 +593,7 @@ const containerClasses = {
 }
 
 module.exports.rootContainerNames = rootContainerNames
+module.exports.containerTypes = containerTypes
 module.exports.containerClasses = containerClasses
 module.exports.PublicContainer = PublicContainer
 module.exports.NfsContainer = NfsContainer

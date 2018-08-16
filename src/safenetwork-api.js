@@ -265,6 +265,7 @@ class SafenetworkApi {
     this.protocol = protocol
     this.parentPath = parentPath
 
+    this.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
     this.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
     this.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
