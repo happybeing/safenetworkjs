@@ -10,16 +10,25 @@
   [ ] safe-containers.js wrappers for root containers with simplified JSON file
       system like interface for each:
     [ ] SafeContainer
-      [ ] Using Safepress2press a/c:
+      [/] Testing using Safepress2press Safepress3press:
           - First _public entry is /remotestorage/documents/notes/517F2A9F-5409-49B7-8714-1209B3DE3834
---------->[ ] BUG It trys getattr on _public/documents not _public/remotestorage
+          [/] BUG It trys getattr on _public/documents not _public/remotestorage
           [/] BUG Need to detect pseudo folder /remotestorage etc and handle different from the full entry
               could just have defaults for when I getEntryValue() fails
     [/]   PublicContainer (_public)
     [/]   PrivateContainer (_music)
     [ ]     PublicNamesContainer (_publicNames)
     [ ]   ServicesContainer
-    [ ]   NfsContainer
+--->[ ]   NfsContainer
+      [ ] wire into Public container (by automount when readdir() on its key?)
+      [ ] implement simplified file interface for example:
+        [ ] saveFile(path, [create])
+        [ ] fileExists(path)
+        [ ] readFile(path)
+        [ ] deleteFile(path)
+      [ ] test using Safepresspress
+      [ ] test using Safepres2spress
+      [ ] test using Safepres3spress
     [ ] put FUSE ops on the above for now, but later:
       [ ] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
