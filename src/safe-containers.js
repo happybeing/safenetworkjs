@@ -213,7 +213,6 @@ class SafeContainer {
     } else {
       let msg = 'file does not exist'
       debug(msg)
-      throw new Error(msg)
     }
     return type
   }
@@ -328,26 +327,6 @@ class SafeContainer {
   async getEntry (entryKey) {
     // TODO
   }
-
-   /*
-   *  Fuse style operations
-   *
-   * These are used one-for-one to implement FUSE operations in safenetwork-fuse
-   */
-  async readdir (itemPath) { debug('PublicContainer readdir(' + itemPath + ')'); return this.listFolder(itemPath).catch((e) => {debug(e.message)}) }
-  async mkdir (itemPath) { debug('TODO PublicContainer mkdir(' + itemPath + ') not implemented'); return {} }
-  async statfs (itemPath) { debug('PublicContainer statfs(' + itemPath + ')'); return this.itemInfo(itemPath).catch((e) => {debug(e.message)}) }
-  async getattr (itemPath) { debug('PublicContainer getattr(' + itemPath + ')'); return this.itemAttributes(itemPath).catch((e) => {debug(e.message)}) }
-  async create (itemPath) { debug('TODO PublicContainer create(' + itemPath + ') not implemented'); return {} }
-  async open (itemPath) { debug('TODO PublicContainer open(' + itemPath + ') not implemented'); return {} }
-  async write (itemPath) { debug('TODO PublicContainer write(' + itemPath + ') not implemented'); return {} }
-  async read (itemPath) { debug('TODO PublicContainer read(' + itemPath + ') not implemented'); return {} }
-  async unlink (itemPath) { debug('TODO PublicContainer unlink(' + itemPath + ') not implemented'); return {} }
-  async rmdir (itemPath) { debug('TODO PublicContainer rmdir(' + itemPath + ') not implemented'); return {} }
-  async rename (itemPath) { debug('TODO PublicContainer rename(' + itemPath + ') not implemented'); return {} }
-  async ftruncate (itemPath) { debug('TODO PublicContainer ftruncate(' + itemPath + ') not implemented'); return {} }
-  async mknod (itemPath) { debug('TODO PublicContainer mknod(' + itemPath + ') not implemented'); return {} }
-  async utimens (itemPath) { debug('TODO PublicContainer utimens(' + itemPath + ') not implemented'); return {} }
 }
 
 /**
@@ -487,7 +466,8 @@ class NfsContainer extends SafeContainer {
       this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
     } catch (err) {
       let info = (this._parent ? this._parent.name + '/' + this._entryKey : this._mdName)
-      throw new Error('NfsContainer failed to init existing MD for ' + info)
+      debug('NfsContainer failed to init existing MD for ' + info)
+      debug(err.message)
     }
   }
 
@@ -558,28 +538,6 @@ class NfsContainer extends SafeContainer {
 
     // TODO implement - see TO DO notes above
   }
-
-// TODO Move these back to NfsHandler
-
-  // Simple FUSE like file system API
-  async readdir (itemPath) {
-    debug('NfsContainer readdir(' + itemPath + ')')
-    return fakeReadDir[itemPath]
-  }
-
-  async mkdir (itemPath) { debug('TODO NfsContainer mkdir(' + itemPath + ') not implemented'); return {} }
-  async statfs (itemPath) { debug('TODO NfsContainer statfs(' + itemPath + ') not implemented'); return {} }
-  async getattr (itemPath) { debug('TODO NfsContainer getattr(' + itemPath + ') not implemented'); return {} }
-  async create (itemPath) { debug('TODO NfsContainer create(' + itemPath + ') not implemented'); return {} }
-  async open (itemPath) { debug('TODO NfsContainer open(' + itemPath + ') not implemented'); return {} }
-  async write (itemPath) { debug('TODO NfsContainer write(' + itemPath + ') not implemented'); return {} }
-  async read (itemPath) { debug('TODO NfsContainer read(' + itemPath + ') not implemented'); return {} }
-  async unlink (itemPath) { debug('TODO NfsContainer unlink(' + itemPath + ') not implemented'); return {} }
-  async rmdir (itemPath) { debug('TODO NfsContainer rmdir(' + itemPath + ') not implemented'); return {} }
-  async rename (itemPath) { debug('TODO NfsContainer rename(' + itemPath + ') not implemented'); return {} }
-  async ftruncate (itemPath) { debug('TODO NfsContainer ftruncate(' + itemPath + ') not implemented'); return {} }
-  async mknod (itemPath) { debug('TODO NfsContainer mknod(' + itemPath + ') not implemented'); return {} }
-  async utimens (itemPath) { debug('TODO NfsContainer utimens(' + itemPath + ') not implemented'); return {} }
 }
 
 // Map of SAFE root container name to wrapper class

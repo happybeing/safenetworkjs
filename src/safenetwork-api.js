@@ -479,7 +479,7 @@ class SafenetworkApi {
         container = new ContainerClass(this, containerName)
         container.initialise().then((result) => {
           this._rootContainers[containerName] = container
-        })
+        }).catch((e) => { debug(e.message); throw e })
       }
     }
 
@@ -498,7 +498,7 @@ class SafenetworkApi {
       container = new ServicesContainer(this, publicName)
       container.intitialise(createNew).then(() => {
         this._servicesContainers[publicName] = container
-      }).catch((e) => { debug(e.message) })
+      }).catch((e) => { debug(e.message); throw e })
     }
 
     return container
@@ -526,7 +526,7 @@ class SafenetworkApi {
       } else {
         container.initialiseExisting().then(() => {
           this._nfsContainers[nameOrKey] = container
-        }).catch((e) => { debug(e.message) })
+        }).catch((e) => { debug(e.message); throw e })
       }
     }
 
