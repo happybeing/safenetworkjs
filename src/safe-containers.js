@@ -99,6 +99,15 @@ class SafeContainer {
     } catch (e) { debug(e.message) }
   }
 
+  /**
+   * Get the MutableData entry for entryKey
+   * @param  {String}         entryKey
+   * @return {Promise}        resolves to ValueVersion
+   */
+  async getEntry (entryKey) {
+    // TODO
+  }
+
   async getEntryAsFile (key) {
     try {
       let value = await this.getEntryValue(key)
@@ -121,7 +130,53 @@ class SafeContainer {
 
   }
 
+  // File System Interface
+  // =====================
+  //
+  // The following methods provide a simplified FS interface
+  // and are used by safenetwork-fuse to provide a virtual
+  // SAFE file system which can be mounted locally.
+  //
+  // Any app can interact with a SAFE through this FS style
+  // interface, not just for access to storage but also
+  // features such as public names and SAFE services using
+  // the corresponding container classes.
+
+  /**
+   * Get the container object that implements FS on itemPath
+   *
+   * Maintains a map of child containers, creating them as necessary
+   * though much on this will be implemented in more specific classes.
+   *
+   * @param  {String}  itemPath path of an item managed by this container or a child
+   * @return {Promise}          an object which implements SafeContainer FS operations
+   */
+  async _getContainerFor (itemPath) {
+    // ???
+    throw new Error('TODO _getContainerFor()')
+  }
+
+  /* Wrappers which first call _getContainerFor()
+   */
+
   async listFolder (folderPath) {
+    return this._getContainerFor(folderPath)._listFolder(folderPath)
+  }
+
+  async itemInfo (itemPath) {
+    return this._getContainerFor(itemPath)._itemInfo(itemPath)
+  }
+
+  async itemType (itemPath) {
+    return this._getContainerFor(itemPath)._itemType(itemPath)
+  }
+
+  async itemAttributes (itemPath) {
+    return this._getContainerFor(itemPath)._itemAttributes(itemPath)
+  }
+
+  // FS implementations
+  async _listFolder (folderPath) {
     debug('listFolder(%s)', folderPath)
     // In some cases the name of the container appears at the start
     // of the key (e.g. '/_public/happybeing/root-www').
@@ -185,7 +240,7 @@ class SafeContainer {
     return listing
   }
 
-  async itemInfo (itemPath) {
+  async _itemInfo (itemPath) {
     debug('itemInfo(%s)', itemPath)
     if (this.isSelf(itemPath)) {
       return this._safeJs.mutableDataStats(this._mData)
@@ -201,7 +256,7 @@ class SafeContainer {
    * @return {String}          A containerTypes value
    */
 
-  async itemType (itemPath) {
+  async _itemType (itemPath) {
     let type = containerTypes.nfsContainer
     let value = await this.getEntryValue(itemPath)
     if (value) {
@@ -219,7 +274,7 @@ class SafeContainer {
 
   // Check if itemPath is a valid part of the path of any key
   // TODO this is probably horribly inefficient
-  async itemMatchesKeyPath (itemPath) {
+  async _itemMatchesKeyPath (itemPath) {
     debug('itemMatchesKeyPath(%s)', itemPath)
 
     if (this.isRootContainer()) {
@@ -259,7 +314,7 @@ class SafeContainer {
     return matched
   }
 
-  async itemAttributes (itemPath) {
+  async _itemAttributes (itemPath) {
     debug('itemAttributes(%s)', itemPath)
     const now = Date.now()
     try {
@@ -317,15 +372,6 @@ class SafeContainer {
     } catch (e) {
       debug(e.message)
     }
-  }
-
-  /**
-   * Get the MutableData entry for entryKey
-   * @param  {String}         entryKey
-   * @return {Promise}        resolves to ValueVersion
-   */
-  async getEntry (entryKey) {
-    // TODO
   }
 }
 
