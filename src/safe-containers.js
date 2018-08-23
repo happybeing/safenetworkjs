@@ -295,9 +295,9 @@ class SafeContainer {
         debug('%s is type: %s', itemPath, containerTypes[type])
         // Default values (used as is for containerTypes.nfsContainer)
         let attributes = {
-          mtime: now,
-          atime: now,
-          ctime: now,
+          modified: now,
+          accessed: now,
+          created: now,
           size: 0,
           version: -1,
           'isFile': false,
