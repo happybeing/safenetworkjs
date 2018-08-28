@@ -470,13 +470,14 @@ class SafenetworkApi {
    * @param  {String} containerName Name of a root container (e.g. '_public')
    * @return {Object}               initialised instance of SafeContainer
    */
-
   async getSafeContainer (containerName) {
     let container = this._rootContainers[containerName]
     if (!container) {
       let ContainerClass = containers.containerClasses[containerName]
       if (ContainerClass) {
-        container = new ContainerClass(this, containerName)
+        let containerPath = '/' + containerName   // Its path for container FS interface
+        let subTree = ''                      // Whole container, not a sub-tree
+        container = new ContainerClass(this, containerName, containerPath, subTree)
         container.initialise().then((result) => {
           this._rootContainers[containerName] = container
         }).catch((e) => { debug(e.message); throw e })
@@ -512,26 +513,27 @@ class SafenetworkApi {
    * @param {Object} parent (optional) typically a SafeContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
    * @return {Object}               initialised instance of NfsContainer
    */
-  async getNfsContainer (nameOrKey, createNew, isPublic, parent) {
-    let container = this._nfsContainers[nameOrKey]
-    if (!container) {
-      if (!createNew) createNew = false
-      container = new NfsContainer(this, nameOrKey, parent)
-      if (createNew) {
-        if (!isPublic) isPublic = false // Defaut to private
-        let ownerName = ''  // Not known (typically a public name so this is just omitted)
-        container.createNew(ownerName, isPublic).then(() => {
-          this._nfsContainers[nameOrKey] = container
-        }).catch((e) => { debug(e.message) })
-      } else {
-        container.initialiseExisting().then(() => {
-          this._nfsContainers[nameOrKey] = container
-        }).catch((e) => { debug(e.message); throw e })
-      }
-    }
-
-    return container
-  }
+  // TODO might be better for people to use "new NfsContainer" so comment out for now
+  // async getNfsContainer (nameOrKey, createNew, isPublic, parent) {
+  //   let container = this._nfsContainers[nameOrKey]
+  //   if (!container) {
+  //     if (!createNew) createNew = false
+  //     container = new NfsContainer(this, nameOrKey, parent)
+  //     if (createNew) {
+  //       if (!isPublic) isPublic = false // Defaut to private
+  //       let ownerName = ''  // Not known (typically a public name so this is just omitted)
+  //       container.createNew(ownerName, isPublic).then(() => {
+  //         this._nfsContainers[nameOrKey] = container
+  //       }).catch((e) => { debug(e.message) })
+  //     } else {
+  //       container.initialiseExisting().then(() => {
+  //         this._nfsContainers[nameOrKey] = container
+  //       }).catch((e) => { debug(e.message); throw e })
+  //     }
+  //   }
+  //
+  //   return container
+  // }
 
   /* --------------------------
   * Simplified MutableData API
@@ -2626,6 +2628,7 @@ module.exports.hostpart = safeUtils.hostpart
 module.exports.protocol = safeUtils.protocol
 module.exports.parentPath = safeUtils.parentPath
 
+module.exports.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
 module.exports.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
 module.exports.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
