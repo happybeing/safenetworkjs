@@ -4,8 +4,9 @@
 
 const path = require('path')  // Cross platform itemPath handling
 
-const isFolder = function (itemPath) {
-  return itemPath.substr(-1) === path.sep
+const isFolder = function (itemPath, separator) {
+  if (!separator) separator = path.sep
+  return (itemPath.substring(itemPath.length - 1) === separator)
 }
 
 // Strip fragment for URI (removes everything from first '#')
@@ -147,13 +148,13 @@ function getFullUri (req) {
 }
 
 function itemPathBasename (fullitemPath) {
-  var bname = ''
+  var basename = ''
   if (fullitemPath) {
-    bname = (fullitemPath.lastIndexOf('/') === fullitemPath.length - 1)
+    basename = (fullitemPath.lastIndexOf('/') === fullitemPath.length - 1)
      ? ''
-     : itemPath.basename(fullitemPath)
+     : fullitemPath.substring(fullitemPath.lastIndexOf('/') + 1)
   }
-  return bname
+  return basename
 }
 
 function hasSuffix (itemPath, suffixes) {
