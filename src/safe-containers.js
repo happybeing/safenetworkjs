@@ -12,7 +12,7 @@ require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
 const debug = require('debug')('safenetworkjs:container')  // Web API
 const path = require('path')
-const u = require('safenetwork-utils')
+const u = require('./safenetwork-utils')
 
 // TODO remove this
 const fakeReadDir = {
@@ -127,7 +127,7 @@ class SafeContainer {
    * @param {Object} safeJs  SafenetworkApi (owner)
    * @param {String} containerName the name of the container (e.g. '_public') or an XOR address if tagType is defined
    * @param {String} containerPath     where this container appears in the SAFE container tree (e.g. '/_public', '/mds')
-   * @param {String} subTree       '' to mount the whole container, or a sub-tree of the container being 'mounted'
+   * @param {String} subTree       [optional] undefined or '' to mount the whole container, or a sub-tree of the container being 'mounted'
    * @param {String} parent        [optional] parent container
    * @param {String} parentEntryKey [optional] key for this container's entry within parent container
    * @param {Number} tagType       [optional] mutable data tag_type (required when containerName is an XOR address)
@@ -137,8 +137,10 @@ class SafeContainer {
    */
   constructor (safeJs, containerName, containerPath, subTree, parent, parentEntryKey, tagType) {
     this._safeJs = safeJs       // SafenetworkJs instance
+    this._name = containerName
     this._containerPath = containerPath + (u.isFolder(containerPath, '/') ? '' : '/')
-    this._subTree = subTree + (subTree === '' || u.isFolder(subTree, '/')) ? '' : '/'
+    if (!subTree) subTree = ''
+    this._subTree = subTree + (subTree === '' || !u.isFolder(subTree, '/')) ? '' : '/'
     this._parent = (parent === undefined ? undefined : parent)
     this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
   }
@@ -174,7 +176,7 @@ class SafeContainer {
       }
 
       // Add to FS cache if it has a containerPath
-      if (this._containerPath !== '') await fsContainerCache.put(this._containerPath, this)
+      if (this._containerPath !== '') await containerMap.put(this._containerPath, this)
     } catch (error) {
       let msg = 'SafeContainer initialise failed: ' + this._name + ' (' + error.message + ')'
       debug(msg + '\n' + error.stack)
@@ -358,15 +360,15 @@ class SafeContainer {
   }
 
   async _getContainerForKey (key) {
-    debug('%s._getContainerForKey(%s)', this.constructor.name, itemPath)
+    debug('%s._getContainerForKey(%s)', this.constructor.name, key)
 
     let container
     try {
-      container = await containerCache.get(key)
+      container = await containerMap.get(key)
       if (!container) {
         container = await this._newChildContainerForKey(key)
         if (container) {
-          containerCache.put(key, container)
+          containerMap.put(key, container)
           container.initialise()
         }
       }
@@ -553,7 +555,7 @@ class SafeContainer {
   }
 
   async callFunctionOnItem (itemPath, functionName) {
-    debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, actionName)
+    debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, functionName)
 
     // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
     // Only need to check container entries if that fails
@@ -565,7 +567,7 @@ class SafeContainer {
     // such as 'index.html' or 'images/profile-picture.png'
 
     // For matching we ignore a trailing '/' so remove if present
-    let itemMatch = ( u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length-1) : itemPath)
+    let itemMatch = (u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length - 1) : itemPath)
 
     // We add this._subTree to the front of the path
     itemMatch = this._subTree + itemMatch
@@ -830,10 +832,12 @@ class PublicContainer extends SafeContainer {
    * @param {Object} safeJs  SafenetworkApi (owner)
    */
   constructor (safeJs, containerName) {
-    super(safeJs, '_public')
+    let containerPath = '/' + containerName
+    let subTree = containerName + '/'
+    super(safeJs, containerName, containerPath, subTree)
   }
 
-  async _newChildContainerForKey (key) {
+  async _newChildContainer9ForKey (key) {
     let msg = '_createContainerForEntry() should be overridden in extending class: ' + this.constructor.name
     debug(msg)
     throw new Error(msg)
