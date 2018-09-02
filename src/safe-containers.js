@@ -140,7 +140,7 @@ class SafeContainer {
     this._name = containerName
     this._containerPath = containerPath + (u.isFolder(containerPath, '/') ? '' : '/')
     if (!subTree) subTree = ''
-    this._subTree = subTree + (subTree === '' || !u.isFolder(subTree, '/')) ? '' : '/'
+    this._subTree = subTree + (subTree === '' || !u.isFolder(subTree, '/') ? '/' : '')
     this._parent = (parent === undefined ? undefined : parent)
     this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
   }
@@ -157,22 +157,20 @@ class SafeContainer {
    */
   async initialise () {
     try {
-      if (containerClasses[this._name] !== PublicContainer) {
-        throw new Error('Invalid PublicContainer name:' + this._name)
-      }
-
       if (this.isRootContainer()) {
         this._mData = await this._safeJs.auth.getContainer(this._name)
       } else if (this._parent && this._parentEntryKey) {
-          // Default assumes child is NfsContainer, so others (e.g. ServicesContainer) must override initialise()
-          let valueVersion = await this._parent.getValueVersion(this._parentEntryKey)
-          if (!this._entryValueVersion || this._entryValueVersion.version !== valueVersion.version) {
-            // Invalidated or not yet initialised
-            await this._initialiseNfsContainer(valueVersion.value)
-            this._entryValueVersion = valueVersion
-          }
+        // Default assumes child is NfsContainer, so others (e.g. ServicesContainer) must override initialise()
+        let valueVersion = await this._parent.getValueVersion(this._parentEntryKey)
+        if (!this._entryValueVersion || this._entryValueVersion.version !== valueVersion.version) {
+          // Invalidated or not yet initialised
+          valueVersion.plainValue = valueVersion.buf
+          try { valueVersion.plainValue = await this._parent._mData.decrypt(valueVersion.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+          await this._initialiseNfsContainer(valueVersion.plainValue)
+          this._entryValueVersion = valueVersion
+        }
       } else {
-          await this._initialiseMutableDataContainer(this._name, this._tagType)
+        await this._initialiseMutableDataContainer(this._name, this._tagType)
       }
 
       // Add to FS cache if it has a containerPath
@@ -234,6 +232,12 @@ class SafeContainer {
     }
   }
 
+  async getValueVersion (key) {
+    try {
+      return this._mData.get(key)
+    } catch (e) { debug(e.message) }
+  }
+
   async getEntryValue (key) {
     try {
       return await this._safeJs.getMutableDataValue(this._mData, key)
@@ -257,6 +261,7 @@ class SafeContainer {
   }
 
   async getEntryAsNfsContainer (key) {
+    // TODO review value of getEntryAsNfsContainer and use of safeJs.getNfsContainer rather than new NfsContainer
     try {
       let value = await this.getEntryValue(key)
       return this._safeJs.getNfsContainer(value, false, this.isPublic(), this)
@@ -264,11 +269,11 @@ class SafeContainer {
   }
 
   async createNfsFolder (folderPath) {
-    debug('TODO createNfsFolder(%s)', folderPath)
+    debug('TODO createNfsFolder(\'%s\')', folderPath)
   }
 
   async insertNfsFolder (nfsFolder) {
-    debug('TODO insertNfsFolder(%s)', folderPath)
+    debug('TODO insertNfsFolder(\'%s\')', folderPath)
   }
   // TODO add further helper methods to the above
 
@@ -353,20 +358,20 @@ class SafeContainer {
    * @param  {String}  key a string matching a mutable data entry in this (parent) container
    * @return {Promise}     a suitable SAFE container for the entry value (mutable data)
    */
-  async _newChildContainerForKey (key) {
-    let msg = '_createContainerForEntry() should be overridden in extending class: ' + this.constructor.name
+  async _createChildContainerForEntry (key) {
+    let msg = '_createChildContainerForEntry() should be overridden in extending class: ' + this.constructor.name
     debug(msg)
     throw new Error(msg)
   }
 
   async _getContainerForKey (key) {
-    debug('%s._getContainerForKey(%s)', this.constructor.name, key)
+    debug('%s._getContainerForKey(\'%s\')', this.constructor.name, key)
 
     let container
     try {
       container = await containerMap.get(key)
       if (!container) {
-        container = await this._newChildContainerForKey(key)
+        container = await this._createChildContainerForEntry(key)
         if (container) {
           containerMap.put(key, container)
           container.initialise()
@@ -385,13 +390,13 @@ class SafeContainer {
 //    * though much on this will be implemented in more specific classes.
 //    *
 //    * Extensions to SafeContainer should implement the _isContainerForItem()
-//    * and _createContainerForEntry() methods on which this method relies
+//    * and _createChildContainerForEntry() methods on which this method relies
 //    *
 //    * @param  {String}  itemPath path relative to root or, if a child, relative to the key of my parent entry
 //    * @return {Promise}          an object which implements SafeContainer FS operations
 //    */
 //   async _getContainerForKey (itemPath) {
-//     debug('%s._getContainerForKey(%s)', this.constructor.name, itemPath)
+//     debug('%s._getContainerForKey(\'%s\')', this.constructor.name, itemPath)
 //     debug('TODO when working, introduce caching 1) of _lastChild, 2) of all _childContainers')
 //     let key = this._getKeyPartOf(itemPath)
 //     if (key === undefined) {
@@ -412,7 +417,7 @@ class SafeContainer {
 //       if (this._isContainerForItem(key)) {
 //         return this
 //       } else {
-//         return this._newChildContainerForKey(key)._getContainerForKey(key)
+//         return this._createChildContainerForEntry(key)._getContainerForKey(key)
 //       }
 //     } catch (e) { debug(e.message) }
 //
@@ -487,7 +492,7 @@ class SafeContainer {
 
   // TODO get working for _public and then test/modify so it also works for NfsContainer
   async listFolder (folderPath) {
-    debug('%s.listFolder(%s)', this.constructor.name, folderPath)
+    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
     // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
     // Only need to check container entries if that fails
@@ -498,11 +503,11 @@ class SafeContainer {
     // or possibly a path which could container directory separators
     // such as 'index.html' or 'images/profile-picture.png'
 
-    // For matching we ignore a trailing '/' so remove if present
-    let folderMatch = ( u.isFolder(folderPath, '/') ? folderPath.substring(0, folderPath.length-1) : folderPath)
-
     // We add this._subTree to the front of the path
-    folderMatch = this._subTree + folderMatch
+    let folderMatch = this._subTree + folderPath
+
+    // For matching we ignore a trailing '/' so remove if present
+    folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
 
     let listing = []
     try {
@@ -519,10 +524,10 @@ class SafeContainer {
 
 //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
       // For matching we ignore a trailing '/' so remove if present
-      let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length-1) : plainKey)
-      debug('Key            : ', plainKey)
-      debug('Match Key      : ', matchKey)
-
+      let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+        debug('Key            : ', plainKey)
+        debug('Match Key      : ', matchKey)
+        debug('Folder Match   : ', folderMatch)
         plainValue = enc.decode(new Uint8Array(plainValue))
         if (plainValue !== v.buf.toString())
           debug('Value (encrypted): ', v.buf.toString())
@@ -534,7 +539,7 @@ class SafeContainer {
         // Check it the folderMatch is at the start of the key, and *shorter*
         if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
           // Item is the first part of the path after the folder (plus a '/')
-          let item = plainKey.substring(folderMatch.length + 1).split('/')[0]
+          let item = plainKey.substring(folderMatch.length).split('/')[1]
           if (item && item.length && listing.indexOf(item) === -1) {
             debug('listing.push(\'%s\')', item)
             listing.push(item)
@@ -588,7 +593,7 @@ class SafeContainer {
 
   //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
           // For matching we ignore a trailing '/' so remove if present
-          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length-1) : plainKey)
+          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
           debug('Key            : ', plainKey)
           debug('Match Key      : ', matchKey)
 
@@ -603,7 +608,7 @@ class SafeContainer {
           // Check it the itemMatch is at the start of the key, and *shorter*
           if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
             // Item is the first part of the path after the folder (plus a '/')
-            let item = plainKey.substring(itemMatch.length + 1).split('/')[0]
+            let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
             result = await this[functionName](itemPath)
           } else if (itemMatch.indexOf(plainKey) === 0) {
             // We've matched the key of a child container, so pass to child
@@ -621,7 +626,7 @@ class SafeContainer {
   }
 
   async itemInfo (itemPath) {
-    debug('%s.itemInfo(%s)', this.constructor.name, itemPath)
+    debug('%s.itemInfo(\'%s\')', this.constructor.name, itemPath)
     try {
       if (this.isSelf(itemPath)) {
         return this._safeJs.mutableDataStats(this._mData)
@@ -681,11 +686,11 @@ class SafeContainer {
 
   // Get the shortest key where itemPath is part of the key
   // TODO this is probably horribly inefficient
-  async _shortestEnclosingKey (itemPath) {
-    debug('_shortestEnclosingKey(%s)', itemPath)
+  async _getShortestEnclosingKey (itemPath) {
+    debug('_getShortestEnclosingKey(\'%s\')', itemPath)
 
     // We add this._subTree to the front of the path
-    itemMatch = this._subTree + itemMatch
+    let itemMatch = this._subTree + itemPath
     debug('Matching path: ', itemMatch)
 
     let result
@@ -713,7 +718,7 @@ class SafeContainer {
   }
 
   async itemAttributes (itemPath) {
-    debug('%s.itemAttributes(%s)', this.constructor.name, itemPath)
+    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
@@ -758,7 +763,7 @@ class SafeContainer {
 
   // TODO when listFolder is working delete OLD_listFolder
   async OLD_listFolder (folderPath) {
-    debug('listFolder(%s)', folderPath)
+    debug('listFolder(\'%s\')', folderPath)
     // In some cases the name of the container appears at the start
     // of the key (e.g. '/_public/happybeing/root-www').
     // In other such as an NFS container it is just the file name
@@ -837,10 +842,15 @@ class PublicContainer extends SafeContainer {
     super(safeJs, containerName, containerPath, subTree)
   }
 
-  async _newChildContainer9ForKey (key) {
-    let msg = '_createContainerForEntry() should be overridden in extending class: ' + this.constructor.name
-    debug(msg)
-    throw new Error(msg)
+  /**
+   * Create a container object of the appropriate class to wrap an MD pointed to an entry in this (parent) container
+   *
+   * @param  {String}  key a string matching a mutable data entry in this (parent) container
+   * @return {Promise}     a suitable SAFE container for the entry value (mutable data)
+   */
+  async _createChildContainerForEntry (key) {
+    debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
+    return new NfsContainer(this._safeJs, key, this, true)
   }
 }
 
@@ -941,7 +951,7 @@ class NfsContainer extends SafeContainer {
    * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
    */
   constructor (safeJs, nameOrKey, parent, isPublic) {
-    super(safeJs, nameOrKey)
+    super(safeJs, nameOrKey, nameOrKey, '', parent, nameOrKey)
     if (parent) {
       this._parent = parent
       this._entryKey = nameOrKey
@@ -1014,7 +1024,7 @@ class NfsContainer extends SafeContainer {
   }
 
   async itemInfo (itemPath) {
-    debug('%s.itemInfo(%s)', this.constructor.name, itemPath)
+    debug('%s.itemInfo(\'%s\')', this.constructor.name, itemPath)
     try {
       if (this.isSelf(itemPath)) {
         return this._safeJs.mutableDataStats(this._mData)
@@ -1039,7 +1049,7 @@ class NfsContainer extends SafeContainer {
   }
 
   async itemAttributes (itemPath) {
-    debug('%s.itemAttributes(%s)', this.constructor.name, itemPath)
+    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {

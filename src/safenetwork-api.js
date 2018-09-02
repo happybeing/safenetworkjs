@@ -18,6 +18,7 @@
     [/]   PublicContainer (_public)
     [/]   PrivateContainer (_music)
     [ ]     PublicNamesContainer (_publicNames)
+    [ ]     modify to ignore webidpoc entries
     [ ]   ServicesContainer
 --->[ ]   NfsContainer
       [ ] wire into Public container (by automount when readdir() on its key?)
@@ -476,7 +477,7 @@ class SafenetworkApi {
       let ContainerClass = containers.containerClasses[containerName]
       if (ContainerClass) {
         let containerPath = '/' + containerName   // Its path for container FS interface
-        let subTree = ''                      // Whole container, not a sub-tree
+        let subTree = containerName               // Default is for path to start with container name
         container = new ContainerClass(this, containerName, containerPath, subTree)
         container.initialise().then((result) => {
           this._rootContainers[containerName] = container
