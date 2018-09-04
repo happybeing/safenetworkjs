@@ -157,6 +157,8 @@ class SafeContainer {
    */
   async initialise () {
     try {
+      if (this._mData) return this._mData
+
       if (this.isRootContainer()) {
         this._mData = await this._safeJs.auth.getContainer(this._name)
       } else if (this._parent && this._parentEntryKey) {
@@ -364,8 +366,8 @@ class SafeContainer {
     throw new Error(msg)
   }
 
-  async _getContainerForKey (key) {
-    debug('%s._getContainerForKey(\'%s\')', this.constructor.name, key)
+  async getContainerForKey (key) {
+    debug('%s.getContainerForKey(\'%s\')', this.constructor.name, key)
 
     let container
     try {
@@ -559,6 +561,7 @@ class SafeContainer {
     return listing
   }
 
+  // TODO track issue and rever to using await when fixed: https://github.com/maidsafe/safe_app_nodejs/issues/278
   async callFunctionOnItem (itemPath, functionName) {
     debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, functionName)
 
@@ -577,12 +580,13 @@ class SafeContainer {
     // We add this._subTree to the front of the path
     itemMatch = this._subTree + itemMatch
 
-    let result
+    let ret
+    let result = []
     try {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       let entries = await this._mData.getEntries()
       await entries.forEach(async (k, v) => {
-        if (!result) {
+        if (!result.length) {
           let plainValue = v.buf
           try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
 
@@ -609,20 +613,52 @@ class SafeContainer {
           if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
             // Item is the first part of the path after the folder (plus a '/')
             let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
-            result = await this[functionName](itemPath)
+            result.push(this[functionName](itemPath))
           } else if (itemMatch.indexOf(plainKey) === 0) {
             // We've matched the key of a child container, so pass to child
             let matchedChild = await this._getContainerForKey(plainKey)
-            result = await matchedChild[functionName](itemMatch.substring(plainKey.length))
+            result.push(matchedChild[functionName](itemMatch.substring(plainKey.length)))
+            // debug('loop result: %o', result)
           }
         }
-      }).catch((e) => { debug(e.message) })
+      })
+      .then(async _ => Promise.all(result)
+      .then(async _ => {
+        if (result.length) {
+          ret = result[0]
+          debug('1-return: %o', ret)
+        }
+        debug('Iteration finished with return: %o', ret)
+      })).catch((e) => { debug(e.message) })
+    } catch (e) {
+      debug(e.message)
+    }
+
+    debug('2-return: %o', ret)
+    return ret
+  }
+
+  // TODO delete this example code
+  async dummy () {
+    let result
+    let promises = []
+    try {
+      let entries = await md.getEntries()
+      await entries.forEach(async (v, k) => {
+        promises.push(someFunction())
+      })
+      .then(async _ => Promise.all(promises)
+      .then(async _ => {
+        if (promises.length) {
+          result = promises[0]
+        }
+        debug('Iteration complete')
+      })).catch((e) => { debug(e.message) })
     } catch (e) {
       debug(e.message)
     }
 
     debug('result: %o', result)
-    return result
   }
 
   async itemInfo (itemPath) {
@@ -1055,16 +1091,17 @@ class NfsContainer extends SafeContainer {
       if (this.isSelf(itemPath)) {
         debug('%s is type: %s', itemPath, containerTypes.nfsContainer)
         await this.updateMetadata()
-        return {
+        let result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
           modified: now,
           accessed: now,
           created: now,
-          size: this.size,
-          version: this.version,
+          size: this._metadata.size,
+          version: this._metadata.version,
           'isFile': false,
           entryType: containerTypes.nfsContainer
         }
+        return result
       }
 
       if (!u.isFolder(itemPath, '/')) {
