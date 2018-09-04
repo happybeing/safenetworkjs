@@ -23,6 +23,10 @@
 --->[ ]   NfsContainer
       [ ] wire into Public container (by automount when readdir() on its key?)
       [ ] update nodejs version and change use of entries forEach to listEntries
+      [ ] support empty folders by creating a placeholder file:
+        [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
+            always points to an immutable data which contains the text
+            -> https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895
       [ ] implement simplified file interface for example:
         [ ] saveFile(path, [create])
         [ ] fileExists(path)
