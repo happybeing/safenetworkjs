@@ -22,6 +22,7 @@
     [ ]   ServicesContainer
 --->[ ]   NfsContainer
       [ ] wire into Public container (by automount when readdir() on its key?)
+      [ ] update nodejs version and change use of entries forEach to listEntries
       [ ] implement simplified file interface for example:
         [ ] saveFile(path, [create])
         [ ] fileExists(path)
@@ -33,6 +34,7 @@
     [ ] put FUSE ops on the above for now, but later:
       [ ] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
+    [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
 [ ] change to generic JSON interface
 [ ] move the 'safenetworkjs and safenetwork-web' notes to README.md of both modules
 [ ] get SafenetworkJs working for both desktop and web app
@@ -640,7 +642,7 @@ class SafenetworkApi {
     try {
       // TODO wrap access to some MDs (eg for _publicNames container) in a getter that is passed permissions
       // TODO checks those permissions, gets the MD, and caches the value, or returns it immediately if not null
-      let publicNamesMd = await this.safeApi.getContainer(this.safeApp, '_publicNames')
+      let publicNamesMd = await this.safeApi.getContainer('_publicNames')
       let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
       let entryKey = this.makePublicNamesEntryKey(publicName)
       let encryptedKey = await this.mutableData.encryptKey(publicNamesMd, entryKey)
@@ -753,7 +755,7 @@ class SafenetworkApi {
       let rootMd
       if (rootContainer !== '') {
         // Check the container does not yet exist
-        rootMd = await this.auth.getContainer(this.safeApp, rootContainer)
+        rootMd = await this.auth.getContainer(rootContainer)
 
         // Check the public container doesn't already exist
         let existingValue = null
@@ -767,7 +769,7 @@ class SafenetworkApi {
       }
 
       // Create the new container
-      let mdHandle = await this.mutableData.newRandomPublic(this.safeApp, mdTagType)
+      let mdHandle = await this.mutableData.newRandomPublic(mdTagType)
       let entriesHandle = await this.mutableData.newEntries(this.safeApp)
       // TODO review this with Web Hosting Manager (where it creates a new root-www container)
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
@@ -861,7 +863,7 @@ class SafenetworkApi {
       // Do this before updating _publicNames and even if that fails, we
       // still own the name so TODO check here first, if one exists that we own
       let servicesMdName = await this.makeServicesMdName(publicName)
-      let servicesMd = await this.mutableData.newPublic(this.safeApp, servicesMdName, SN_TAGTYPE_SERVICES)
+      let servicesMd = await this.mutableData.newPublic(servicesMdName, SN_TAGTYPE_SERVICES)
 
       var enc = new TextDecoder()
       logApi('created services MD with servicesMdName: %s', enc.decode(new Uint8Array(servicesMdName)))
@@ -887,7 +889,7 @@ class SafenetworkApi {
       let r = await this.mutableData.getNameAndTag(servicesMd)
       logApi('servicesMd created with tag: ', r.type_tag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
-      let publicNamesMd = await this.safeApi.getContainer(this.safeApp, '_publicNames')
+      let publicNamesMd = await this.safeApi.getContainer('_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
       let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
       let namesMutation = await this.mutableDataEntries.mutate(entriesHandle)
@@ -971,7 +973,7 @@ class SafenetworkApi {
 
       logApi("host '%s' has publicName '%s'", host, publicName)
       let servicesName = await this.makeServicesMdName(publicName)
-      let mdHandle = await this.mutableData.newPublic(this.safeApp, servicesName, SN_TAGTYPE_SERVICES)
+      let mdHandle = await this.mutableData.newPublic(servicesName, SN_TAGTYPE_SERVICES)
       if (await this.mutableDataExists(mdHandle)) {
         var enc = new TextDecoder()
         logApi('Look up SUCCESS for MD XOR name: ' + enc.decode(new Uint8Array(servicesName)))
@@ -1005,7 +1007,7 @@ class SafenetworkApi {
       logApi("host '%s' has publicName '%s'", host, publicName)
 
       let nameKey = this.makePublicNamesEntryKey(publicName)
-      let mdHandle = await this.safeApi.getContainer(this.safeApp, '_publicNames')
+      let mdHandle = await this.safeApi.getContainer('_publicNames')
       logApi('_publicNames ----------- start ----------------')
       let entriesHandle = await this.mutableData.getEntries(mdHandle)
       await this.mutableDataEntries.forEach(entriesHandle, (k, v) => {
@@ -1166,8 +1168,8 @@ class SafenetworkApi {
    * @return {Boolean}       true if the name is a recognised as a public root container
    */
   isPublicContainer (containerName) {
-      // Currently there is only _public
-      return contanerName === '_public'
+    // Currently there is only _public
+    return containerName === '_public'
   }
 
   // Helper to get a mutable data handle for an MD hash
@@ -1179,7 +1181,7 @@ class SafenetworkApi {
   async getMdFromHash (hash, tagType) {
     logApi('getMdFromHash(%s,%s)...', hash, tagType)
     try {
-      return this.mutableData.newPublic(this.safeApp, hash, tagType)
+      return this.mutableData.newPublic(hash, tagType)
     } catch (err) {
       logApi('getMdFromHash() ERROR: %s', err)
       throw err
@@ -1197,7 +1199,7 @@ class SafenetworkApi {
   // @returns the XOR name as a String, for the services MD unique to the given public name
   async makeServicesMdName (publicName) {
     logApi('makeServicesMdName(%s)', publicName)
-    return this.crypto.sha3Hash(this.safeApp, publicName)
+    return this.crypto.sha3Hash(publicName)
   }
 
   // Helper to create the key for looking up a public name entry in the _publicNames container
@@ -1319,7 +1321,7 @@ class SafenetworkApi {
       logApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
 
       try {
-        response = await this.safeApi.webFetch(this.safeApp, docUri, options)
+        response = await this.safeApi.webFetch(docUri, options)
       } catch (err) {
         logApi('%s._fetch() error: %s', this.constructor.name, err)
         response = new Response(null, {status: 404, statusText: '404 Not Found'})
@@ -1433,7 +1435,7 @@ class SafenetworkApi {
   async listContainer (containerName) {
     logTest('listContainer(%s)...', containerName)
     logTest(containerName + ' ----------- start ----------------')
-    let mdHandle = await this.safeApi.getContainer(this.safeApp, containerName)
+    let mdHandle = await this.safeApi.getContainer(containerName)
     await this.listMd(mdHandle, containerName)
     logTest(containerName + '------------ end -----------------')
   }
@@ -1652,7 +1654,7 @@ class SafeServiceWww extends ServiceInterface {
   // @returns see window.fetch() and your services specification
   async _fetch () {
     logApi('%s._fetch(%o) calling this.safeApi.webFetch()', this.constructor.name, arguments)
-    return this.safeApi.webFetch.apply(null, this.safeApp, arguments)
+    return this.safeApi.webFetch.apply(null, arguments)
   }
 }
 
@@ -1853,7 +1855,7 @@ class SafeServiceLDP extends ServiceInterface {
 
     try {
       // The service value is the address of the storage container (Mutable Data)
-      this._storageMd = await this.mutableData.newPublic(this.safeApp, this.getServiceValue().buf, this.getTagType())
+      this._storageMd = await this.mutableData.newPublic(this.getServiceValue().buf, this.getTagType())
       // TODO remove this existence check:
       await this.mutableData.getVersion(this._storageMd)
 
