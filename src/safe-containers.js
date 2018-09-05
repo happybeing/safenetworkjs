@@ -580,8 +580,8 @@ class SafeContainer {
     return listing
   }
 
-  async callFunctionOnItem (itemPath, functionName) {
-    debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, functionName)
+  async callFunctionOnItem (itemPath, functionName, p1, p2, p3, p4) {
+    debug('%s.callFunctionOnItem(%s, %s, %s, %s, %s, %s)', this.constructor.name, itemPath, functionName, p1, p2, p3, p4)
 
     // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
     // Only need to check container entries if that fails
@@ -632,13 +632,13 @@ class SafeContainer {
             if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
               // Item is the first part of the path after the folder (plus a '/')
               let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
-              result = this[functionName](item)
+              result = this[functionName](item, p1, p2, p3, p4)
               debug('loop result-1: %o', await result)
               resolve(result)
             } else if (itemMatch.indexOf(plainKey) === 0) {
               // We've matched the key of a child container, so pass to child
               let matchedChild = await this._getContainerForKey(plainKey)
-              result = await matchedChild[functionName](itemMatch.substring(plainKey.length+1))
+              result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p1, p2, p3, p4)
               debug('loop result-2: %o', await result)
               resolve(result)
             }
@@ -785,6 +785,16 @@ class SafeContainer {
           entryType: type
         }
       }
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async readFile (itemPath, pos, len) {
+    debug('%s.readFile(\'%s\', %s, %s)', this.constructor.name, itemPath, pos, len)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'readFile', pos, len)
     } catch (e) {
       debug(e.message)
     }
@@ -1062,6 +1072,14 @@ class NfsContainer extends SafeContainer {
     } catch (e) {
       debug(e.message)
     }
+  }
+
+  async readFile (itemPath, pos, len) {
+    debug('%s.readFile(\'%s\', %s, %s)', this.constructor.name, itemPath, pos, len)
+    try {
+      let file = await this.getEntryAsFile(itemPath)
+      return file.read(pos, len)
+    } catch (e) { debug(e.message) }
   }
 
   /**
