@@ -275,8 +275,9 @@ class SafeContainer {
   }
 
   async insertNfsFolder (nfsFolder) {
-    debug('TODO insertNfsFolder(\'%s\')', folderPath)
+    debug('TODO insertNfsFolder(\'%s\')', nfsFolder)
   }
+
   // TODO add further helper methods to the above
 
   // File System Interface
@@ -366,8 +367,8 @@ class SafeContainer {
     throw new Error(msg)
   }
 
-  async getContainerForKey (key) {
-    debug('%s.getContainerForKey(\'%s\')', this.constructor.name, key)
+  async _getContainerForKey (key) {
+    debug('%s._getContainerForKey(\'%s\')', this.constructor.name, key)
 
     let container
     try {
@@ -550,7 +551,7 @@ class SafeContainer {
           // We've matched the key of a child container, so pass to child
           let matchedChild = await this._getContainerForKey(plainKey)
           let childList = await matchedChild.listFolder(folderMatch.substring(plainKey.length))
-          listing.concat(childList)
+          listing = listing.concat(childList)
         }
       }).catch((e) => { debug(e.message) })
     } catch (e) {
