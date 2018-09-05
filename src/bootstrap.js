@@ -78,7 +78,7 @@ Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
     uri = await ipcReceive(String(process.pid))
   }
 
-  return Safe.fromAuthURI(appInfo, uri, null, options)
+  return Safe.fromAuthUri(appInfo, uri, null, options)
 }
 
 async function authorise (pid, appInfo, appContainers, containerOpts, options) {
@@ -92,7 +92,7 @@ async function authorise (pid, appInfo, appContainers, containerOpts, options) {
     ]
   }
 
-  const app = await Safe.initializeApp(appInfo, undefined, options)
+  const app = await Safe.initialiseApp(appInfo, undefined, options)
   const uri = await app.auth.genAuthUri(appContainers, containerOpts)
 
   debug('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo) +

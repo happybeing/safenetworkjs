@@ -493,7 +493,6 @@ class SafeContainer {
    * @return {Promise}            list of sub-folder names at folderPath
    */
 
-  // TODO get working for _public and then test/modify so it also works for NfsContainer
   async listFolder (folderPath) {
     debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
@@ -516,14 +515,15 @@ class SafeContainer {
     try {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       let entries = await this._mData.getEntries()
-      await entries.forEach(async (k, v) => {
-        let plainValue = v.buf
-        try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach(async (entry) => {
+        let plainValue = entry.value.buf
+        try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
 
         let enc = new TextDecoder()
-        let plainKey = enc.decode(new Uint8Array(k))
-        if (plainKey !== k.toString())
-          debug('Key (encrypted): ', k.toString())
+        let plainKey = enc.decode(new Uint8Array(entry.key))
+        if (plainKey !== entry.key.toString())
+          debug('Key (encrypted): ', entry.key.toString())
 
 //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
       // For matching we ignore a trailing '/' so remove if present
@@ -532,16 +532,24 @@ class SafeContainer {
         debug('Match Key      : ', matchKey)
         debug('Folder Match   : ', folderMatch)
         plainValue = enc.decode(new Uint8Array(plainValue))
-        if (plainValue !== v.buf.toString())
-          debug('Value (encrypted): ', v.buf.toString())
+        if (plainValue !== entry.value.buf.toString())
+          debug('Value (encrypted): ', entry.value.buf.toString())
 
         debug('Value            :', plainValue)
 
-        debug('Version: ', v.version)
+        debug('Version: ', entry.value.version)
 
-        // Check it the folderMatch is at the start of the key, and *shorter*
-        if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
-          // Item is the first part of the path after the folder (plus a '/')
+        // Check if the folderMatch is root of the key
+        if (folderMatch === '') {
+          // Item is the first part of the path
+          let item = plainKey.split('/')[0]
+          if (item && item.length && listing.indexOf(item) === -1) {
+            debug('listing.push(\'%s\')', item)
+            listing.push(item)
+          }
+        } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
+          // As the folderMatch is at the start of the key, and *shorter*,
+          // item is the first part of the path after the folder (plus a '/')
           let item = plainKey.substring(folderMatch.length).split('/')[1]
           if (item && item.length && listing.indexOf(item) === -1) {
             debug('listing.push(\'%s\')', item)
@@ -558,12 +566,166 @@ class SafeContainer {
       debug(e.message)
     }
 
-    debug('listing: %o', listing)
+    debug('%s.listing: %o', constructor.name, listing)
     return listing
   }
 
-  // TODO track issue and rever to using await when fixed: https://github.com/maidsafe/safe_app_nodejs/issues/278
+  // TODO delete safe_app_nodejs v0.8.1 version:
+  async forEach_listFolder (folderPath) {
+    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
+
+    // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
+    // Only need to check container entries if that fails
+
+    // In some cases the name of the container appears at the start
+    // of the key (e.g. '/_public/happybeing/root-www').
+    // In other such as an NFS container it is just the file name
+    // or possibly a path which could container directory separators
+    // such as 'index.html' or 'images/profile-picture.png'
+
+    // We add this._subTree to the front of the path
+    let folderMatch = this._subTree + folderPath
+
+    // For matching we ignore a trailing '/' so remove if present
+    folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
+
+    let listing = []
+    try {
+      // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+      let entries = await this._mData.getEntries()
+      await entries.forEach(async (k, v) => {
+        let plainValue = entry.value.buf
+        try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+
+        let enc = new TextDecoder()
+        let plainKey = enc.decode(new Uint8Array(entry.key))
+        if (plainKey !== entry.key.toString())
+          debug('Key (encrypted): ', entry.key.toString())
+
+//???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
+      // For matching we ignore a trailing '/' so remove if present
+      let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+        debug('Key            : ', plainKey)
+        debug('Match Key      : ', matchKey)
+        debug('Folder Match   : ', folderMatch)
+        plainValue = enc.decode(new Uint8Array(plainValue))
+        if (plainValue !== entry.value.buf.toString())
+          debug('Value (encrypted): ', entry.value.buf.toString())
+
+        debug('Value            :', plainValue)
+
+        debug('Version: ', entry.value.version)
+
+        // Check if the folderMatch is root of the key
+        if (folderMatch === '') {
+          // Item is the first part of the path
+          let item = plainKey.split('/')[0]
+          if (item && item.length && listing.indexOf(item) === -1) {
+            debug('listing.push(\'%s\')', item)
+            listing.push(item)
+          }
+        } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
+          // As the folderMatch is at the start of the key, and *shorter*,
+          // item is the first part of the path after the folder (plus a '/')
+          let item = plainKey.substring(folderMatch.length).split('/')[1]
+          if (item && item.length && listing.indexOf(item) === -1) {
+            debug('listing.push(\'%s\')', item)
+            listing.push(item)
+          }
+        } else if (folderMatch.indexOf(plainKey) === 0) {
+          // We've matched the key of a child container, so pass to child
+          let matchedChild = await this._getContainerForKey(plainKey)
+          let childList = await matchedChild.listFolder(folderMatch.substring(plainKey.length))
+          listing = listing.concat(childList)
+        }
+      }).catch((e) => { debug(e.message) })
+    } catch (e) {
+      debug(e.message)
+    }
+
+    debug('%s.listing: %o', constructor.name, listing)
+    return listing
+  }
+
   async callFunctionOnItem (itemPath, functionName) {
+    debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, functionName)
+
+    // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
+    // Only need to check container entries if that fails
+
+    // In some cases the name of the container appears at the start
+    // of the key (e.g. '/_public/happybeing/root-www').
+    // In other such as an NFS container it is just the file name
+    // or possibly a path which could container directory separators
+    // such as 'index.html' or 'images/profile-picture.png'
+
+    // For matching we ignore a trailing '/' so remove if present
+    let itemMatch = (u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length - 1) : itemPath)
+
+    // We add this._subTree to the front of the path
+    itemMatch = this._subTree + itemMatch
+
+    let ret
+    let result = []
+    try {
+      // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+      let entries = await this._mData.getEntries()
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach(async (entry) => {
+        if (!result.length) {
+          let plainValue = entry.value.buf
+          try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+
+          let enc = new TextDecoder()
+          let plainKey = enc.decode(new Uint8Array(entry.key))
+          if (plainKey !== entry.key.toString())
+            debug('Key (encrypted): ', entry.key.toString())
+
+  //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
+          // For matching we ignore a trailing '/' so remove if present
+          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+          debug('Key            : ', plainKey)
+          debug('Match Key      : ', matchKey)
+
+          plainValue = enc.decode(new Uint8Array(plainValue))
+          if (plainValue !== entry.value.buf.toString())
+            debug('Value (encrypted): ', entry.value.buf.toString())
+
+          debug('Value            :', plainValue)
+
+          debug('Version: ', entry.value.version)
+
+          // Check it the itemMatch is at the start of the key, and *shorter*
+          if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
+            // Item is the first part of the path after the folder (plus a '/')
+            let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
+            result.push(this[functionName](itemPath))
+          } else if (itemMatch.indexOf(plainKey) === 0) {
+            // We've matched the key of a child container, so pass to child
+            let matchedChild = await this._getContainerForKey(plainKey)
+            result.push(matchedChild[functionName](itemMatch.substring(plainKey.length)))
+            // debug('loop result: %o', result)
+          }
+        }
+      })
+      .then(async _ => Promise.all(result)
+      .then(async _ => {
+        if (result.length) {
+          ret = result[0]
+          debug('1-return: %o', ret)
+        }
+        debug('Iteration finished with return: %o', ret)
+      })).catch((e) => { debug(e.message) })
+    } catch (e) {
+      debug(e.message)
+    }
+
+    debug('2-return: %o', ret)
+    return ret
+  }
+
+  // TODO delete safe_app_nodejs v0.8.1 version:
+  async forEach_callFunctionOnItem (itemPath, functionName) {
     debug('%s.callFunctionOnItem(%s, %s)', this.constructor.name, itemPath, functionName)
 
     // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
@@ -588,13 +750,13 @@ class SafeContainer {
       let entries = await this._mData.getEntries()
       await entries.forEach(async (k, v) => {
         if (!result.length) {
-          let plainValue = v.buf
-          try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+          let plainValue = entry.value.buf
+          try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
 
           let enc = new TextDecoder()
-          let plainKey = enc.decode(new Uint8Array(k))
-          if (plainKey !== k.toString())
-            debug('Key (encrypted): ', k.toString())
+          let plainKey = enc.decode(new Uint8Array(entry.key))
+          if (plainKey !== entry.key.toString())
+            debug('Key (encrypted): ', entry.key.toString())
 
   //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
           // For matching we ignore a trailing '/' so remove if present
@@ -603,12 +765,12 @@ class SafeContainer {
           debug('Match Key      : ', matchKey)
 
           plainValue = enc.decode(new Uint8Array(plainValue))
-          if (plainValue !== v.buf.toString())
-            debug('Value (encrypted): ', v.buf.toString())
+          if (plainValue !== entry.value.buf.toString())
+            debug('Value (encrypted): ', entry.value.buf.toString())
 
           debug('Value            :', plainValue)
 
-          debug('Version: ', v.version)
+          debug('Version: ', entry.value.version)
 
           // Check it the itemMatch is at the start of the key, and *shorter*
           if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
@@ -731,23 +893,26 @@ class SafeContainer {
     debug('Matching path: ', itemMatch)
 
     let result
-    let entries = await this._mData.getEntries()
-    await entries.forEach(async (k, v) => {
-      let enc = new TextDecoder()
-      let plainKey = enc.decode(new Uint8Array(k))
-      if (plainKey !== k.toString())
-        debug('Key (encrypted): ', k.toString())
+    try {
+      let entries = await this._mData.getEntries()
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach(async (entry) => {
+        let enc = new TextDecoder()
+        let plainKey = enc.decode(new Uint8Array(entry.key))
+        if (plainKey !== entry.key.toString())
+          debug('Key (encrypted): ', entry.key.toString())
 
-      debug('Key            : ', plainKey)
-      debug('Matching against: ', itemMatch)
+        debug('Key            : ', plainKey)
+        debug('Matching against: ', itemMatch)
 
-      if (plainKey.indexOf(itemMatch) === 0) {
-        if (!result || result.length > plainKey.length) {
-          result = plainKey
-          debug('MATCHED: ', plainKey)
+        if (plainKey.indexOf(itemMatch) === 0) {
+          if (!result || result.length > plainKey.length) {
+            result = plainKey
+            debug('MATCHED: ', plainKey)
+          }
         }
-      }
-    }).catch((e) => { debug(e.message) })
+      })
+    } catch (e) { debug(e.message) }
 
     if (!result) debug('NO MATCH')
 
@@ -818,24 +983,24 @@ class SafeContainer {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       let entries = await this._mData.getEntries()
       await entries.forEach(async (k, v) => {
-        let plainValue = v.buf
-        try { plainValue = await this._mData.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+        let plainValue = entry.value.buf
+        try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
 
         let enc = new TextDecoder()
-        let plainKey = enc.decode(new Uint8Array(k))
-        if (plainKey !== k.toString())
-          debug('Key (encrypted): ', k.toString())
+        let plainKey = enc.decode(new Uint8Array(entry.key))
+        if (plainKey !== entry.key.toString())
+          debug('Key (encrypted): ', entry.key.toString())
 
         if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
         debug('Key            : ', plainKey)
 
         plainValue = enc.decode(new Uint8Array(plainValue))
-        if (plainValue !== v.buf.toString())
-          debug('Value (encrypted): ', v.buf.toString())
+        if (plainValue !== entry.value.buf.toString())
+          debug('Value (encrypted): ', entry.value.buf.toString())
 
         debug('Value            :', plainValue)
 
-        debug('Version: ', v.version)
+        debug('Version: ', entry.value.version)
 
         let itemMatch = plainKey
         if (this.isRootContainer()) {
@@ -1056,9 +1221,9 @@ class NfsContainer extends SafeContainer {
 
   // TODO see if the SafeContainer listFolder can be made to handle this
   // -> start with just deleting this:
-  async listFolder (folderPath) {
-      return ['TODO', 'write-nfs-container', 'listfolder']
-  }
+  // async listFolder (folderPath) {
+  //     return ['TODO', 'write-nfs-container', 'listfolder']
+  // }
 
   async itemInfo (itemPath) {
     debug('%s.itemInfo(\'%s\')', this.constructor.name, itemPath)
@@ -1163,7 +1328,7 @@ class NfsContainer extends SafeContainer {
   // TODO create an NFS container in _public for a SAFE service
   // TODO modify this to use the service classes and service configs rather than have duplicate code
   // TODO I think servicePath might change - check status with Gabriel re my proposals
-  // TODO here: https://forum.safedev.org/t/proposals-for-restful-service-handling/1550
+  // TODO here: https://forum.safedeentry.value.org/t/proposals-for-restful-service-handling/1550
   // TODO Gabriel had some responses/alternatives which I liked but can't find those.
   async createServiceFolder (tagType, servicePath, metaFor) {
     throw new Error('createServiceFolder() not yet implemented')
