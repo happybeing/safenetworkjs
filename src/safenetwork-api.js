@@ -21,22 +21,23 @@
     [ ]     modify to ignore webidpoc entries
     [ ]   ServicesContainer
 --->[ ]   NfsContainer
-      [ ] wire into Public container (by automount when readdir() on its key?)
-      [ ] update nodejs version and change use of entries forEach to listEntries
+      [/] wire into Public container (by automount when readdir() on its key?)
+      [/] update nodejs version and change use of entries forEach to listEntries
+      [ ] refactor older code still using forEach on entries to use listEntries (see listFolder for method)
       [ ] support empty folders by creating a placeholder file:
         [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
             always points to an immutable data which contains the text
             -> https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895
+      [ ] first useful release - read only access to _public, including listing file contents:
+        [ ] add ability to read file content (e.g. cat <somefile>)
+          [ ] readFile(path)
+        [ ] then create cross platform release
       [ ] implement simplified file interface for example:
         [ ] saveFile(path, [create])
         [ ] fileExists(path)
-        [ ] readFile(path)
         [ ] deleteFile(path)
-      [ ] test using Safepresspress
-      [ ] test using Safepres2spress
-      [ ] test using Safepres3spress
-    [ ] put FUSE ops on the above for now, but later:
-      [ ] if poss. move the FUSE ops back into the safenetwork-fuse
+    [/] put FUSE ops on the above for now, but later:
+      [/] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
     [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
 [ ] change to generic JSON interface
@@ -547,7 +548,7 @@ class SafenetworkApi {
   * --------------------------
   */
 
-  // Get the key/value of an entry from a mutable data object
+  // Get the ValueVersion of an entry from a mutable data object
   //
   // Encryption is handled automatically by the DOM APIs
   // - if the MD is public, they do nothing
@@ -557,7 +558,7 @@ class SafenetworkApi {
   // @param key the key to read
   //
   // @returns a Promise which resolves to a ValueVersion
-  async getMutableDataValue (mData, key) {
+  async getMutableDataValueVersion (mData, key) {
     logApi('getMutableDataValue(%s,%s)...', mData, key)
     let useKey = await mData.encryptKey(key)
     try {
@@ -2364,8 +2365,7 @@ const ns = require('solid-namespace')($rdf)
     // Set up a metaFile path
     // Earlier code used a .ttl file as its own meta file, which
     // caused massive data files to parsed as part of deirectory listings just looking for type triples
-    if (metaFilePath)
-    resourceGraph = this._addFileMetadata(resourcesGraph, metaFilePath, fullItemUri)
+    if (metaFilePath) resourceGraph = this._addFileMetadata(resourcesGraph, metaFilePath, fullItemUri)
 
     return resourceGraph
   }
