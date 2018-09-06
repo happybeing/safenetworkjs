@@ -87,7 +87,7 @@ class ContainerMap {
   }
 }
 
-const containerMap = new ContainerMap
+const containerMap = new ContainerMap()
 
 /**
  * Base class for SAFE root containers
@@ -197,7 +197,7 @@ class SafeContainer {
     } catch (e) { debug(e.message) }
   }
 
-  create() {
+  create () {
     // Template only - should be implemented in extender
     // class (i.e. NfsContainer, ServicesContainer etc) to
     // ensure any parent is updated correctly
@@ -214,7 +214,7 @@ class SafeContainer {
 
   isPublic () { return true }
   isSelf (itemPath) { return itemPath === '' }  // Empty path is equivalent to '.'
-  isHiddenEntry(key) { return false }           // Some containers have hidden entries (e.g. for metadata)
+  isHiddenEntry (key) { return false }           // Some containers have hidden entries (e.g. for metadata)
 
   nfs () {
     if (!this._nfs) throw new Error('NFS emulation not yet intitialised')
@@ -688,7 +688,7 @@ class SafeContainer {
         type = containerTypes.rootContainer
       } else {
         // Check for fakeContainer or NFS container
-        let itemAsFolder = ( u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
+        let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
         let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
         if (shortestEnclosingKey) {
           if (shortestEnclosingKey.length !== itemPath.length) {
@@ -790,11 +790,35 @@ class SafeContainer {
     }
   }
 
-  async readFile (itemPath, pos, len) {
-    debug('%s.readFile(\'%s\', %s, %s)', this.constructor.name, itemPath, pos, len)
+  async openFile (itemPath, nfsFlags) {
+    debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'readFile', pos, len)
+      return await this.callFunctionOnItem(itemPath, 'openFile', nfsFlags)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  // Read up to len bytes starting from pos
+  // return as a String
+  async readFile (itemPath, fd, pos, len) {
+    debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  // Write up to len bytes into buf (Uint8Array), starting at pos
+  // return number of bytes written
+  async readFileBuf (itemPath, fd, buf, pos, len) {
+    debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
     } catch (e) {
       debug(e.message)
     }
@@ -1074,11 +1098,44 @@ class NfsContainer extends SafeContainer {
     }
   }
 
-  async readFile (itemPath, pos, len) {
-    debug('%s.readFile(\'%s\', %s, %s)', this.constructor.name, itemPath, pos, len)
+  async openFile (itemPath, nfsFlags) {
+    debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
+      let file = await this.nfs().fetch(itemPath)
+      file = await this.nfs().open(file, nfsFlags)
+      debug('file opened, size: ', await file.size())
+      return file
+    } catch (e) { debug(e.message) }
+  }
+
+  async readFile (itemPath, fd, pos, len) {
+    debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
+    try {
+      // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
       let file = await this.getEntryAsFile(itemPath)
-      return file.read(pos, len)
+      file = await this.nfs().open(file, this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+      let size = await file.size()
+      if (pos + len > size) len = size - pos
+      let content = await file.read(pos, len)
+      debug('%s bytes read from file.', content.byteLength)
+
+      let decoder = new TextDecoder()
+      return decoder.decode(content)
+    } catch (e) { debug(e.message) }
+  }
+
+  async readFileBuf (itemPath, fd, buf, pos, len) {
+    debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
+    try {
+      // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
+      let file = await this.getEntryAsFile(itemPath)
+      file = await this.nfs().open(file, this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+      let size = await file.size()
+      if (pos + len > size) len = size - pos
+      let readBuf = await file.read(pos, len)
+      debug('%s bytes read from file.', readBuf.byteLength)
+      buf.set(readBuf)
+      return readBuf.byteLength
     } catch (e) { debug(e.message) }
   }
 
