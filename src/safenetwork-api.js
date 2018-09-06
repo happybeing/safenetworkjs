@@ -18,24 +18,30 @@
     [/]   PublicContainer (_public)
     [/]   PrivateContainer (_music)
     [ ]     PublicNamesContainer (_publicNames)
+        [ ] add listing of _publicNames
     [ ]     modify to ignore webidpoc entries
     [ ]   ServicesContainer
+        [ ] add listing of public name services
 --->[ ]   NfsContainer
       [/] wire into Public container (by automount when readdir() on its key?)
       [/] update nodejs version and change use of entries forEach to listEntries
-      [ ] refactor older code still using forEach on entries to use listEntries (see listFolder for method)
-      [ ] support empty folders by creating a placeholder file:
-        [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
-            always points to an immutable data which contains the text
-            -> https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895
       [ ] first useful release - read only access to _public, including listing file contents:
-        [ ] add ability to read file content (e.g. cat <somefile>)
-          [ ] readFile(path)
+        [/] add ability to read file content (e.g. cat <somefile>)
+          [/] readFileBuf(path)
         [ ] then create cross platform release
+      [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
       [ ] implement simplified file interface for example:
+        [ ] first consider using file descriptors so that open/read/write/close
+            can operate with less redundant calls (e.g. repeated fetch/open in
+            each readFileBuf() call). But discuss gains with Maidsafe first if
+            no obvious efficiencies in my code.
         [ ] saveFile(path, [create])
         [ ] fileExists(path)
         [ ] deleteFile(path)
+        [ ] support empty folders by creating a placeholder file:
+        [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
+        always points to an immutable data which contains the text
+        -> https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895
     [/] put FUSE ops on the above for now, but later:
       [/] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
@@ -240,7 +246,7 @@ class SafenetworkApi {
           this._safeContainerOpts = containerOpts
           this._safeAuthUri = ''  // TODO refactor to get this from safeApi.bootstrap()
           return safeApp
-        })
+        }).catch((e) => debug('%s constructor - error calling bootstrap() to authorise with SAFE Network'))
       }
     }
     this._availableServices = new Map() // Map of installed services
@@ -559,15 +565,14 @@ class SafenetworkApi {
   //
   // @returns a Promise which resolves to a ValueVersion
   async getMutableDataValueVersion (mData, key) {
-    logApi('getMutableDataValue(%s,%s)...', mData, key)
-    let useKey = await mData.encryptKey(key)
+    logApi('getMutableDataValueVersion(%s,%s)...', mData, key)
     try {
+      let useKey = await mData.encryptKey(key)
       let valueVersion = await mData.get(useKey)
       valueVersion.buf = mData.decrypt(valueVersion.buf)
       return valueVersion
     } catch (err) {
-      logApi("getMutableDataValue() WARNING no entry found for key '%s'", key)
-      throw err
+      logApi("getMutableDataValueVersion() WARNING no entry found for key '%s'", key)
     }
   }
 
@@ -2341,7 +2346,7 @@ const ns = require('solid-namespace')($rdf)
         logLdp('%s._getFolder(\'%s\', ...) response %s body:\n %s', this.constructor.name, docUri, response.status, triples)
 
         return response
-      }))
+      })).catch((e) => debug(e.message))
     } catch (err) { // TODO review error handling and responses
       logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
       // TODO are their any SAFE API codes we need to detect?

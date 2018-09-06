@@ -566,9 +566,9 @@ class SafeContainer {
             debug('%s.listing-3: %o', constructor.name, listing)
           }
           resolve() // Resolve the entry's promise
-        }))
+        }).catch((e) => debug(e.message)))
       })
-      await Promise.all(listingQ)
+      await Promise.all(listingQ).catch((e) => debug(e.message))
       debug('%s.listing-4-END: %o', constructor.name, listing)
       return listing
     } catch (e) {
@@ -599,8 +599,8 @@ class SafeContainer {
     itemMatch = this._subTree + itemMatch
 
     let result
-    return new Promise(async (resolve, reject) => {
-      try {
+    try {
+      return new Promise(async (resolve, reject) => {
         // TODO remove debug calls (and comment out the value parts until moved elsewhere)
         let entries = await this._mData.getEntries()
         let entriesList = await entries.listEntries()
@@ -644,11 +644,14 @@ class SafeContainer {
             }
           }
         })
-      } catch (e) {
+      }).catch((e) => {
         debug('ERROR: %s.callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
         debug(e.message)
-      }
-    })
+      })
+    } catch (e) {
+      debug('ERROR: %s.callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
+      debug(e.message)
+    }
   }
 
   async itemInfo (itemPath) {
@@ -758,8 +761,8 @@ class SafeContainer {
           modified: now,
           accessed: now,
           created: now,
-          size: this.size,
-          version: this.version,
+          size: this._metadata.size,
+          version: this._metadata.version,
           'isFile': false,
           entryType: containerTypes.rootContainer
         }
@@ -1108,6 +1111,12 @@ class NfsContainer extends SafeContainer {
     } catch (e) { debug(e.message) }
   }
 
+  // TODO Review possible use of fd (file descriptor). Could use to hold a set
+  //      of fetched and/or open File objects rather than having to do do
+  //      fetch() and open() again before every read or write
+
+  // Read up to len bytes starting from pos
+  // return as a String
   async readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
@@ -1124,6 +1133,8 @@ class NfsContainer extends SafeContainer {
     } catch (e) { debug(e.message) }
   }
 
+  // Write up to len bytes into buf (Uint8Array), starting at pos
+  // return number of bytes written
   async readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
