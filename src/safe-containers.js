@@ -483,6 +483,48 @@ class SafeContainer {
   //
 
   /**
+   * Return a copy of Mutable Data Entry with additional decoded members: plainKey and plainValue
+   *
+   * This implementation attempts to decrypt keys and entries.
+   *
+   * Child classes can implement a simpler version that always or never decrypts, as needed
+   *
+   * @param  {Object}  entry   An entry object, such as those returned by MutableData.listEntries()
+   * @param  {Object}  options [optional] when omitted, decode key and value, otherwise depends on properties of decodeKey and decodeValue
+   * @return {Promise}         [description]
+   */
+  async _decodeEntry (entry, options) {
+    let decodedEntry = entry
+    try {
+      let enc = new TextDecoder()
+
+      if (!options || options.decodeKey) {
+        let plainKey = entry.key
+        try { plainKey = await this._mData.decrypt(plainKey) } catch (e) { console.log('Key decryption ERROR: %s', e) }
+        plainKey = enc.decode(new Uint8Array(plainKey))
+        if (plainKey !== entry.key.toString())
+          debug('Key (encrypted): ', entry.key.toString())
+        debug('Key            : ', plainKey)
+        decodedEntry.plainKey = plainKey
+      }
+
+      if (!options || options.decodeValue) {
+        let plainValue = entry.value.buf
+        try { plainValue = await this._mData.decrypt(plainValue) } catch (e) { debug('Value decryption ERROR: %s', e) }
+        plainValue = enc.decode(new Uint8Array(plainValue))
+        if (plainValue !== entry.value.buf.toString())
+          debug('Value (encrypted): ', entry.value.buf.toString())
+        debug('Value            :', plainValue)
+
+        debug('Version: ', entry.value.version)
+        decodedEntry.plainValue = plainValue
+      }
+
+      return entry
+    } catch (e) { debug(e) }
+  }
+
+  /**
    * get a list of folders
    *
    * @param  {String}  folderPath path relative to this._containerPath
@@ -515,28 +557,14 @@ class SafeContainer {
       let entriesList = await entries.listEntries()
       entriesList.forEach(async (entry) => {
         listingQ.push(new Promise(async (resolve, reject) => {
-          let plainValue = entry.value.buf
-          try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
-
-          let enc = new TextDecoder()
-          let plainKey = enc.decode(new Uint8Array(entry.key))
-          if (plainKey !== entry.key.toString())
-            debug('Key (encrypted): ', entry.key.toString())
+          let decodedEntry = await this._decodeEntry(entry)
+          let plainKey = decodedEntry.plainKey
 
   //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
         // For matching we ignore a trailing '/' so remove if present
           let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-          debug('Key            : ', plainKey)
           debug('Match Key      : ', matchKey)
           debug('Folder Match   : ', folderMatch)
-          plainValue = enc.decode(new Uint8Array(plainValue))
-          if (plainValue !== entry.value.buf.toString())
-            debug('Value (encrypted): ', entry.value.buf.toString())
-
-          debug('Value            :', plainValue)
-
-          debug('Version: ', entry.value.version)
-
           // Some containers don't list all entries (e.g. if they holdd metadata)
           if (this.isHiddenEntry(plainKey)) {
             resolve()
@@ -614,7 +642,6 @@ class SafeContainer {
             if (plainKey !== entry.key.toString())
               debug('Key (encrypted): ', entry.key.toString())
 
-    //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
             // For matching we ignore a trailing '/' so remove if present
             let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
             debug('Key            : ', plainKey)
@@ -682,6 +709,7 @@ class SafeContainer {
    */
 
   async itemType (itemPath) {
+    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
     let type = containerTypes.nfsContainer
     try {
       let value = await this.getEntryValue(itemPath)
@@ -716,37 +744,38 @@ class SafeContainer {
   // Get the shortest key where itemPath is part of the key
   // TODO this is probably horribly inefficient
   async _getShortestEnclosingKey (itemPath) {
-    debug('_getShortestEnclosingKey(\'%s\')', itemPath)
+    debug('%s._getShortestEnclosingKey(\'%s\')', this.constructor.name, itemPath)
 
     // We add this._subTree to the front of the path
     let itemMatch = this._subTree + itemPath
     debug('Matching path: ', itemMatch)
 
     let result
+    let resultQ = []
     try {
       let entries = await this._mData.getEntries()
       let entriesList = await entries.listEntries()
-      await entriesList.forEach(async (entry) => {
-        let enc = new TextDecoder()
-        let plainKey = enc.decode(new Uint8Array(entry.key))
-        if (plainKey !== entry.key.toString())
-          debug('Key (encrypted): ', entry.key.toString())
+      entriesList.forEach(async (entry) => {
+        resultQ.push(new Promise(async (resolve, reject) => {
+          let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
+          let plainKey = decodedEntry.plainKey
+          debug('Key            : ', plainKey)
+          debug('Matching against: ', itemMatch)
 
-        debug('Key            : ', plainKey)
-        debug('Matching against: ', itemMatch)
-
-        if (plainKey.indexOf(itemMatch) === 0) {
-          if (!result || result.length > plainKey.length) {
-            result = plainKey
-            debug('MATCHED: ', plainKey)
+          if (plainKey.indexOf(itemMatch) === 0) {
+            if (!result || result.length > plainKey.length) {
+              result = plainKey
+              debug('MATCHED: ', plainKey)
+            }
           }
-        }
+          resolve()
+        }).catch((e) => debug(e)))
       })
-    } catch (e) { debug(e.message) }
-
-    if (!result) debug('NO MATCH')
-
-    return result
+      return Promise.all(resultQ).then(_ => {
+        debug('MATCH RESULT: ', (result !== undefined ? result : '<no match>'))
+        return result
+      }).catch((e) => debug(e))
+    } catch (e) { debug(e) }
   }
 
   async itemAttributes (itemPath) {
@@ -876,16 +905,33 @@ class PrivateContainer extends SafeContainer {
   isPublic () { return false }
 }
 
-/* TODO not sure if this is best as 'extends' or a stand-alone class
-class PublicNamesContainer {
+class PublicNamesContainer extends SafeContainer {
+  /**
+   * @param {Object} safeJs  SafenetworkApi (owner)
+   */
   constructor (safeJs) {
-    super(safeJs, '_publicNames')
+    let containerName = '_publicNames'
+    let containerPath = '/' + containerName
+    let subTree = ''
+    super(safeJs, containerName, containerPath, subTree)
     if (containerClasses[this._name] !== PublicNamesContainer) {
       throw new Error('Invalid PublicNamesContainer name:' + containerName)
     }
   }
+
+  /**
+   * Create a container object of the appropriate class to wrap an MD pointed to an entry in this (parent) container
+   *
+   * @param  {String}  key a string matching a mutable data entry in this (parent) container
+   * @return {Promise}     a suitable SAFE container for the entry value (mutable data)
+   */
+  async _createChildContainerForEntry (key) {
+    debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
+    debug('ERROR - TODO IMPLEMENTE: %s._createChildContainerForEntry()')
+    return undefined
+//    return new ServicesContainer(this._safeJs, key, this, true)
+  }
 }
-*/
 
 /**
  * Wrapper for MutableData services container (for a public name)
@@ -1195,8 +1241,8 @@ const containerClasses = {
   '_documents': PrivateContainer,
   '_photos': PrivateContainer,
   '_music': PrivateContainer,
-  '_video': PrivateContainer
-// TODO  '_publicNames': PublicNamesContainer
+  '_video': PrivateContainer,
+  '_publicNames': PublicNamesContainer
 }
 
 module.exports.rootContainerNames = rootContainerNames

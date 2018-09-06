@@ -25,6 +25,7 @@
 --->[ ]   NfsContainer
       [/] wire into Public container (by automount when readdir() on its key?)
       [/] update nodejs version and change use of entries forEach to listEntries
+      [ ] ensure all uses of listEntries are sound (e.g. using push(new Promise()))
       [ ] first useful release - read only access to _public, including listing file contents:
         [/] add ability to read file content (e.g. cat <somefile>)
           [/] readFileBuf(path)
