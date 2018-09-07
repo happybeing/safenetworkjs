@@ -25,10 +25,19 @@
 --->[ ]   NfsContainer
       [/] wire into Public container (by automount when readdir() on its key?)
       [/] update nodejs version and change use of entries forEach to listEntries
-      [ ] ensure all uses of listEntries are sound (e.g. using push(new Promise()))
+      [ ] ensure all uses of listEntries work correctly (e.g. using push(new Promise()))
       [ ] first useful release - read only access to _public, including listing file contents:
         [/] add ability to read file content (e.g. cat <somefile>)
           [/] readFileBuf(path)
+        [ ] implement _publicNames
+          [/] listing of public names
+          [/] listing of services
+          [ ] listing of files under a service container
+        [ ] create new account for more tests - _publicNames for garbage after an upload
+            -> a/c 1 has only one public name but two entries, one of which is garbage
+            -> a/c 2 has no public names and no entris
+            [ ] create a/c 3 and upload one public name - check number of entries / garbage?
+            [ ] add more public names and files and use to test more thoroughly
         [ ] then create cross platform release
       [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
       [ ] implement simplified file interface for example:
@@ -1258,6 +1267,16 @@ class SafenetworkApi {
     }
 
     return (hostProfile + '@' + serviceId)
+  }
+
+  // Return an object with hostProfile and serviceId based on the serviceKey
+  decodeServiceKey (serviceKey) {
+    let result = { hostProfile: serviceKey, serviceId: 'www' }
+    if (serviceKey.indexOf('@') !== -1) {
+      result.hostProfile = serviceKey.split('@')[0]
+      result.serviceId = serviceKey.split('@')[1]
+    }
+    return result
   }
 
   // ////// TODO END of 'move to Service class/implementation'
