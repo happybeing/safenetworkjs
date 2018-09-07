@@ -20,7 +20,7 @@ const fakeReadDir = {
   '/_public': ['four', 'five', 'happybeing']
 }
 
-const rootContainerNames = [
+const defaultContainerNames = [
   '_public',
   '_documents',
   '_music',
@@ -30,10 +30,12 @@ const rootContainerNames = [
 ]
 
 const containerTypes = {
-  rootContainer: 'root-container',// root container (e.g. _public)
-  nfsContainer: 'nfs-container',  // an NFS container, or if in a root container an entry that ends with slash
-  file: 'file',                   // an entry that doesn't end with slash
-  fakeContainer: 'fake-container', // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
+  defaultContainer: 'default-container',  // SAFE default container (e.g. _public, _publicNames etc)
+  nfsContainer: 'nfs-container',    // an NFS container, or if in a default container an entry that ends with slash
+  file: 'file',                     // an entry that doesn't end with slash
+  fakeContainer: 'fake-container',  // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
+  servicesContainer: 'services-container',  // Services container for a public name
+  service: 'service',               // Services container for a public name
   notValid: 'not-found'
 }
 
@@ -90,7 +92,7 @@ class ContainerMap {
 const containerMap = new ContainerMap()
 
 /**
- * Base class for SAFE root containers
+ * Base class for SAFE containers
  *
  * Defaults are set for _public
  */
@@ -103,7 +105,7 @@ class SafeContainer {
    * SAFE container types.
    *
    * SafeContainer is a template which is extended to create classes
-   * which handle the SAFE root containers (_public, _publicNames),
+   * which handle the SAFE default containers (_public, _publicNames),
    * services containers, and NFS containers.
    *
    * You can also access 'stand-alone containers' via an XOR address (see below)
@@ -114,7 +116,7 @@ class SafeContainer {
    *
    * Stand-alone Containers
    * ----------------------
-   * A stand-alone container is not a root container *and* has no parent
+   * A stand-alone container is not a default container *and* has no parent
    * container.
    *
    * If you wish to use the file system (FS) interface with a stand-alone
@@ -140,9 +142,10 @@ class SafeContainer {
     this._name = containerName
     this._containerPath = containerPath + (u.isFolder(containerPath, '/') ? '' : '/')
     if (!subTree) subTree = ''
-    this._subTree = subTree + (subTree === '' || !u.isFolder(subTree, '/') ? '/' : '')
+    this._subTree = subTree + (subTree.length && !u.isFolder(subTree, '/') ? '/' : '')
     this._parent = (parent === undefined ? undefined : parent)
     this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
+    this._tagType = (tagType === undefined ? undefined : tagType)
   }
 
   /**
@@ -159,20 +162,19 @@ class SafeContainer {
     try {
       if (this._mData) return this._mData
 
-      if (this.isRootContainer()) {
+      if (this.isDefaultContainer()) {
+        // TODO check we have th desired permissions and if not request them
         this._mData = await this._safeJs.auth.getContainer(this._name)
       } else if (this._parent && this._parentEntryKey) {
-        // Default assumes child is NfsContainer, so others (e.g. ServicesContainer) must override initialise()
+        // Get xor address from parent entry
         let valueVersion = await this._parent.getValueVersion(this._parentEntryKey)
         if (!this._entryValueVersion || this._entryValueVersion.version !== valueVersion.version) {
           // Invalidated or not yet initialised
-          valueVersion.plainValue = valueVersion.buf
-          try { valueVersion.plainValue = await this._parent._mData.decrypt(valueVersion.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
-          await this._initialiseNfsContainer(valueVersion.plainValue)
-          this._entryValueVersion = valueVersion
+          this._mData = await this._initialiseFromXorName(valueVersion.buf)
+          if (this._mData) this._entryValueVersion = valueVersion
         }
       } else {
-        await this._initialiseMutableDataContainer(this._name, this._tagType)
+        this._mData = await this._initialiseFromXorName(this._name, this._tagType)
       }
 
       // Add to FS cache if it has a containerPath
@@ -184,16 +186,11 @@ class SafeContainer {
     }
   }
 
-  async _initialiseNfsContainer (xorName) {
+  async _initialiseFromXorName (xorName, tagType) {
+    if (tagType === undefined) tagType = this._tagType
     try {
-      await this._initialiseMutableDataContainer(xorName, this._safeJs.SN_TAGTYPE_NFS).catch((e) => { debug(e.message) })
-      if (this._mData) this._nfs = await this._mData.emulateAs('NFS')
-    } catch (e) { debug(e.message) }
-  }
-
-  async _initialiseMutableDataContainer (xorName, tagType) {
-    try {
-      this._mData = await this._safeJs.getMdFromHash(xorName, tagType)
+      if (tagType === undefined) throw new Error(this.constructor.name + '._initialiseFromXorName() - tagType not defined')
+      return this._safeJs.getMdFromHash(xorName, tagType)
     } catch (e) { debug(e.message) }
   }
 
@@ -204,10 +201,10 @@ class SafeContainer {
     throw new Error(this.constructor.name + '.create() - TODO (not yet implemented in extener class)')
   }
 
-  // SafeContainer assumes root, so override this in non-root container classes
-  isRootContainer () {
-    // Catch call on non-root container due to lack of override:
-    if (this._parent) throw new Error(this.constructor.name + '.isRootContainer() - TODO (not yet implemented in extener class)')
+  // SafeContainer assumes it is a default container, so override this in non-default container classes
+  isDefaultContainer () {
+    // Catch call on non-default container due to lack of override:
+    if (this._parent) throw new Error(this.constructor.name + '.isDefaultContainer() - TODO (not yet implemented in extener class)')
 
     return true
   }
@@ -215,9 +212,11 @@ class SafeContainer {
   isPublic () { return true }
   isSelf (itemPath) { return itemPath === '' }  // Empty path is equivalent to '.'
   isHiddenEntry (key) { return false }           // Some containers have hidden entries (e.g. for metadata)
+  encryptKeys () { return this._encryptKeys === true }
+  encryptValues () { return this._encryptValues === true }
 
   nfs () {
-    if (!this._nfs) throw new Error('NFS emulation not yet intitialised')
+    if (!this._nfs) this._nfs = this._mData.emulateAs('NFS')
     return this._nfs
   }
 
@@ -233,14 +232,14 @@ class SafeContainer {
 
   async getValueVersion (key) {
     try {
-      return this._mData.get(key)
+      return this._safeJs.getMutableDataValueVersion(this._mData, key)
     } catch (e) { debug(e.message) }
   }
 
   async getEntryValue (key) {
     try {
-      return this._safeJs.getMutableDataValueVersion(this._mData, key).value
-    } catch (e) { debug('getMutableDataValueVersion() error - ' + e.message) }
+      return (await this._safeJs.getMutableDataValueVersion(this._mData, key)).buf
+    } catch (e) { debug('%s.getEntryValue(%s) error: %s', this.constructor.name, key, e) }
   }
 
   /**
@@ -290,13 +289,13 @@ class SafeContainer {
   // the corresponding container classes.
   //
   // This interface assumes a heirarchy of containers as follows:
-  //    /<root-container>
+  //    /<default-container>
   //                    \--<NFS-container>
   //                    \--<NFS-container>
   //                              :
   //                    \--<NFS-container>
   //    Where:
-  //          <root-container> is a default container for files
+  //          <default-container> is a default container for files
   //          such as _public, _music etc
   //          <NFS-container> is a mutable data used to store files
   //          using the SAFE API emulate as 'NFS' feature.
@@ -381,97 +380,6 @@ class SafeContainer {
     return container
   }
 
-// ************** TODO delete the following commented out code
-//   /**
-//    * Get the child container object that wraps an entry in this container
-//    *
-//    * Maintains a map of child containers, creating them as necessary
-//    * though much on this will be implemented in more specific classes.
-//    *
-//    * Extensions to SafeContainer should implement the _isContainerForItem()
-//    * and _createChildContainerForEntry() methods on which this method relies
-//    *
-//    * @param  {String}  itemPath path relative to root or, if a child, relative to the key of my parent entry
-//    * @return {Promise}          an object which implements SafeContainer FS operations
-//    */
-//   async _getContainerForKey (itemPath) {
-//     debug('%s._getContainerForKey(\'%s\')', this.constructor.name, itemPath)
-//     debug('TODO when working, introduce caching 1) of _lastChild, 2) of all _childContainers')
-//     let key = this._getKeyPartOf(itemPath)
-//     if (key === undefined) {
-//       let msg = 'path \'' + itemPath + '\' does not map to container at ' + this._containerPath
-//       debug(msg)
-//       throw new Error(msg)
-//     }
-//
-//     if (this.isRootContainer()) {
-//       // If present, strip the container name from the front of the itemPath ready to match entry keys below
-//       if (itemPath.indexOf('/' + this._name) === 0) itemPath = itemPath.substr(this._name.length + 1)
-//     }
-//
-//     debug('itemPath: ', itemPath)
-//     debug('key     : ', key)
-//
-//     try {
-//       if (this._isContainerForItem(key)) {
-//         return this
-//       } else {
-//         return this._createChildContainerForEntry(key)._getContainerForKey(key)
-//       }
-//     } catch (e) { debug(e.message) }
-//
-//     // Caching version starts here
-// ??? we should recurse (unless we match the cached child?)
-//
-//     // First level single item cache to speed multiple ops on an item in succession
-//     // is invalidated if the parent container's (this) version changes
-// // TODO ??? not sure about containerPath here
-// // TODO ??? may need to trim parent path from itemPath first
-//     if (this._lastChild && this._lastChild._isContainerForItem(itemPath)) {
-//       if ( this._lastChildVersion && this._lastChildVersion === this.getVersion() ) return this._lastChild
-//     }
-//
-//     // Second level cache of all child containers used so far
-//     // is invalidated if the parent container's (this) version changes
-//     if ( this._childContainersVersion !== this.getVersion() ) {
-//       this._childContainers = []
-//     }
-//     this._childContainers.forEach((child, path) => {
-//       if (!foundContainer && itemPath.indexOf(child.containerPath) === 0) {
-//         foundContainer = child
-//         this._lastChild = child
-//         this._lastChildVersion = child.getVersion()
-//       })
-//     })
-//
-//     if (!foundContainer) {
-//       ??? is this where to create a new child and add it to _childContainers
-//     }
-//
-//     return foundContainer
-//     // ???
-//     throw new Error('TODO _getContainerFor()')
-//   }
-//
-//   /* Wrappers which first call _getContainerFor()
-//    */
-//
-//   async listFolder (folderPath) {
-//     return this._getContainerFor(folderPath)._listFolder(folderPath)
-//   }
-//
-//   async itemInfo (itemPath) {
-//     return this._getContainerFor(itemPath)._itemInfo(itemPath)
-//   }
-//
-//   async itemType (itemPath) {
-//     return this._getContainerFor(itemPath)._itemType(itemPath)
-//   }
-//
-//   async itemAttributes (itemPath) {
-//     return this._getContainerFor(itemPath)._itemAttributes(itemPath)
-//   }
-
   // FS implementations
 
   // These methods operate on the data held in a mutable data container class
@@ -520,7 +428,7 @@ class SafeContainer {
         decodedEntry.plainValue = plainValue
       }
 
-      return entry
+      return decodedEntry
     } catch (e) { debug(e) }
   }
 
@@ -534,7 +442,7 @@ class SafeContainer {
   async listFolder (folderPath) {
     debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
-    // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
+    // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
     // Only need to check container entries if that fails
 
     // In some cases the name of the container appears at the start
@@ -560,7 +468,6 @@ class SafeContainer {
           let decodedEntry = await this._decodeEntry(entry)
           let plainKey = decodedEntry.plainKey
 
-  //???        if (plainKey[0] !== path.sep) plainKey = path.sep + plainKey
         // For matching we ignore a trailing '/' so remove if present
           let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
           debug('Match Key      : ', matchKey)
@@ -570,6 +477,8 @@ class SafeContainer {
             resolve()
             return // Skip this one
           }
+          // TODO remove temp skip of strange entry in _publicNames:
+          if (plainKey[0] !== '_' && !plainKey[0].match(/^[0-9a-z]+$/)) { resolve(); return }
 
           if (folderMatch === '') { // Check if the folderMatch is root of the key
             // Item is the first part of the path
@@ -611,7 +520,7 @@ class SafeContainer {
   async callFunctionOnItem (itemPath, functionName, p1, p2, p3, p4) {
     debug('%s.callFunctionOnItem(%s, %s, %s, %s, %s, %s)', this.constructor.name, itemPath, functionName, p1, p2, p3, p4)
 
-    // TODO if a rootContainer check cache against sub-paths of folderPath (longest first)
+    // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
     // Only need to check container entries if that fails
 
     // In some cases the name of the container appears at the start
@@ -634,26 +543,29 @@ class SafeContainer {
         let entriesList = await entries.listEntries()
         entriesList.forEach(async (entry) => {
           if (!result) {
-            let plainValue = entry.value.buf
-            try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+            let decodedEntry = await this._decodeEntry(entry)
+            let plainKey = decodedEntry.plainKey
 
-            let enc = new TextDecoder()
-            let plainKey = enc.decode(new Uint8Array(entry.key))
-            if (plainKey !== entry.key.toString())
-              debug('Key (encrypted): ', entry.key.toString())
+            // let plainValue = entry.value.buf
+            // try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+            //
+            // let enc = new TextDecoder()
+            // let plainKey = enc.decode(new Uint8Array(entry.key))
+            // if (plainKey !== entry.key.toString())
+            //   debug('Key (encrypted): ', entry.key.toString())
 
             // For matching we ignore a trailing '/' so remove if present
             let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
             debug('Key            : ', plainKey)
             debug('Match Key      : ', matchKey)
 
-            plainValue = enc.decode(new Uint8Array(plainValue))
-            if (plainValue !== entry.value.buf.toString())
-              debug('Value (encrypted): ', entry.value.buf.toString())
-
-            debug('Value            :', plainValue)
-
-            debug('Version: ', entry.value.version)
+            // plainValue = enc.decode(new Uint8Array(plainValue))
+            // if (plainValue !== entry.value.buf.toString())
+            //   debug('Value (encrypted): ', entry.value.buf.toString())
+            //
+            // debug('Value            :', plainValue)
+            //
+            // debug('Version: ', entry.value.version)
 
             // Check it the itemMatch is at the start of the key, and *shorter*
             if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
@@ -708,15 +620,19 @@ class SafeContainer {
    * @return {String}          A containerTypes value
    */
 
+  _entryTypeOf (key) {
+    return (u.isFolder(key, '/') ? containerTypes.nfsContainer : containerTypes.file)
+  }
+
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.nfsContainer
+    let type = containerTypes.notValid
     try {
       let value = await this.getEntryValue(itemPath)
-      if (value) {  // Exact match with folder or file
-        type = (u.isFolder(itemPath, '/') ? containerTypes.nfsContainer : containerTypes.file)
+      if (value) {  // itemPath exact match with entry key, so determine entry type for this container
+        type = this._entryTypeOf(itemPath)
       } else if (this.isSelf(itemPath)) {
-        type = containerTypes.rootContainer
+        type = containerTypes.defaultContainer
       } else {
         // Check for fakeContainer or NFS container
         let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
@@ -783,7 +699,7 @@ class SafeContainer {
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypes.rootContainer)
+        debug('%s is type: %s', itemPath, containerTypes.defaultContainer)
         await this.updateMetadata()
         return {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
@@ -793,13 +709,16 @@ class SafeContainer {
           size: this._metadata.size,
           version: this._metadata.version,
           'isFile': false,
-          entryType: containerTypes.rootContainer
+          entryType: containerTypes.defaultContainer
         }
       }
 
       let type = await this.itemType(itemPath)
-      if (type === containerTypes.file || type === containerTypes.nfsContainer) {
-        debug('%s is type: %s', itemPath, containerTypes[type])
+      if (type === containerTypes.file ||
+          type === containerTypes.nfsContainer ||
+          type === containerTypes.service ||
+          type === containerTypes.servicesContainer) {
+        debug('%s is type: %s', itemPath, type)
         return await this.callFunctionOnItem(itemPath, 'itemAttributes')
       }
 
@@ -858,7 +777,7 @@ class SafeContainer {
 }
 
 /**
- * Wrapper for _public (SAFE root container)
+ * Wrapper for _public (SAFE default container)
  *
  * @extends SafeContainer
  */
@@ -885,7 +804,7 @@ class PublicContainer extends SafeContainer {
 }
 
 /**
- * Wrapper for private root container such as '_documents', '_music'
+ * Wrapper for private default container such as '_documents', '_music'
  *
  * TODO implement support for private containers (_documents, _music etc)
  * TODO implement support for application own container
@@ -893,11 +812,11 @@ class PublicContainer extends SafeContainer {
 class PrivateContainer extends SafeContainer {
   /**
    * @param {Object} safeJs  SafenetworkApi (owner)
-   * @param {String} containerName Name of a private root container such as '_documents'
+   * @param {String} containerName Name of a private default container such as '_documents'
    */
   constructor (safeJs, containerName) {
     super(safeJs, containerName)
-    if (containerClasses[containerName] !== PrivateContainer) {
+    if (defaultContainers[containerName] !== PrivateContainer) {
       throw new Error('Invalid PrivateContainer name:' + containerName)
     }
   }
@@ -914,9 +833,31 @@ class PublicNamesContainer extends SafeContainer {
     let containerPath = '/' + containerName
     let subTree = ''
     super(safeJs, containerName, containerPath, subTree)
-    if (containerClasses[this._name] !== PublicNamesContainer) {
+    if (defaultContainers[this._name] !== PublicNamesContainer) {
       throw new Error('Invalid PublicNamesContainer name:' + containerName)
     }
+  }
+
+  _entryTypeOf (key) {
+    return containerTypes.servicesContainer
+  }
+
+  async itemType (itemPath) {
+    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
+    let type = containerTypes.notValid
+    try {
+      let value = await this.getEntryValue(itemPath)
+      if (value) {
+        // itemPath exact match with entry key, so determine entry type from the key
+        type = this._entryTypeOf(itemPath)
+      }
+    } catch (error) {
+      type = containerTypes.notValid
+      debug('public name not found: ', itemPath)
+      debug(error.message)
+    }
+
+    return type
   }
 
   /**
@@ -927,9 +868,7 @@ class PublicNamesContainer extends SafeContainer {
    */
   async _createChildContainerForEntry (key) {
     debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
-    debug('ERROR - TODO IMPLEMENTE: %s._createChildContainerForEntry()')
-    return undefined
-//    return new ServicesContainer(this._safeJs, key, this, true)
+    return new ServicesContainer(this._safeJs, this, key)
   }
 }
 
@@ -939,24 +878,146 @@ class PublicNamesContainer extends SafeContainer {
 // TODO extends SafeContainer or something else?
 class ServicesContainer extends SafeContainer {
   /**
-   * @param {Object} safeJs  SafenetworkApi (owner)
-   * @param {String} publicName public name for which this holds services
+   * [constructor description]
+   * @param {SafenetworkJs} safeJs  SafenetworkJS API object
+   * @param {Object} parent (required) the PublicNamesContainer object
+   * @param {String} parentEntryKey  the key in _publicNames where this MD is/will be stored
    */
-  constructor (safeJs, publicName) {
-    throw new Error('ServicesContainer not yet implemented')
+  constructor (safeJs, parent, parentEntryKey) {
+    if (!parent || parent.constructor.name !== 'PublicNamesContainer') throw new Error('ServicesContainer must have a parent PublicNamesContainer')
+
+    let subTree = ''
+    super(safeJs, 'services', parentEntryKey, subTree, parent, parentEntryKey, safeJs.SN_TAGTYPE_SERVICES)
+    this._mdName = safeJs.makeServicesMdName(parentEntryKey)
+    this._isPublic = true
   }
 
-  isRootContainer () { return false }
+  isDefaultContainer () { return false }
+  isPublic () { return this._isPublic }
+//  isHiddenEntry (key) { return key === '_metadata' } // Some containers have hidden entries (e.g. for metadata)
 
   /**
-   * Initialise by accessing services MutableData for a public name
+   * Initialise by accessing existing MutableData compatible with NFS emulation
    * @return {Promise}
    */
   async initialiseExisting () {
-    this._mData = undefined // TODO
+    try {
+      if (this._parent) {
+        let valueVersion = await this._parent.getEntry(this._parentEntryKey)
+        this._mdName = valueVersion.value
+      }
+
+      this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
+      this._mdVersion = await this._mDate.getVersion()  // This verifies it exists
+    } catch (err) {
+      let info = (this._parent ? this._parent.name + '/' + this._parentEntryKey : this._mdName)
+      debug('%s failed to init existing MD for ', this.constructor.name, info)
+      debug(err.message)
+    }
   }
 
+  /**
+   * Create a services MutableData and insert into parent PublicNamesContainer
+   * @return {Promise}          a newly created {MutableData}
+   */
+  async createPublicName () {
+    this._mData = await this._safeJs.createPublicName(this._parentEntryKey)
+    this._mdVersion = this._mData.getVersion()
+    return this._mData
+  }
+
+  // TODO add support for creating services when resuming support for services
+  //      in safeJs (see setupServiceForHost)
+
   // TODO add methods to access existing service entries (e.g. enumerate, get by name)
+
+  _entryTypeOf (key) {
+    return containerTypes.service
+  }
+
+  async itemType (itemPath) {
+    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
+    let type = containerTypes.notValid
+    try {
+      let value = await this.getEntryValue(itemPath)
+      if (value) {
+        // itemPath exact match with entry key, so determine entry type from the key
+        type = this._entryTypeOf(itemPath)
+      }
+    } catch (error) {
+      type = containerTypes.notValid
+      debug('service not found: ', itemPath)
+      debug(error.message)
+    }
+
+    return type
+  }
+
+  // TODO use safeJs service support when resuming that code
+  _isContainerService (serviceName) {
+    return (serviceName === 'www' || serviceName === 'ldp')
+  }
+
+  async itemInfo (itemPath) {
+    debug('%s.itemInfo(\'%s\')', this.constructor.name, itemPath)
+    try {
+      if (this.isSelf(itemPath)) {
+        return this._safeJs.mutableDataStats(this._mData)
+      } else {
+        let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
+        if (serviceProperties && this._isContainerService(serviceProperties.name)) {
+          // Pass to the child container
+          return this.callFunctionOnItem(itemPath, 'itemInfo')
+        } else {
+          debug('Unrecognised service: ', itemPath)
+        }
+      }
+    } catch (error) { debug(error.message) }
+  }
+
+  async itemAttributes (itemPath) {
+    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
+    const now = Date.now()
+    try {
+      if (this.isSelf(itemPath)) {
+        debug('%s is type: %s', itemPath, containerTypes.servicesContainer)
+        await this.updateMetadata()
+        return {
+          // TODO improve this if SAFE accounts ever have suitable values for size etc:
+          modified: now,
+          accessed: now,
+          created: now,
+          size: this._metadata.size,
+          version: this._metadata.version,
+          'isFile': false,
+          entryType: containerTypes.servicesContainer
+        }
+      }
+
+      let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
+      if (serviceProperties && this._isContainerService(serviceProperties.name)) {
+        // Service with container, so pass to child
+        debug('%s has a container: %s', itemPath, containerTypes[type])
+        return await this.callFunctionOnItem(itemPath, 'itemAttributes')
+      }
+
+      // Service without its own container (or unkown service)
+      let type = containerTypes.service
+      debug('%s is type: %s', itemPath, type)
+      // Default values (used as is for containerTypes.nfsContainer)
+      return {
+        modified: now,
+        accessed: now,
+        created: now,
+        size: 0,
+        version: -1,
+        'isFile': true,
+        entryType: containerTypes.service
+      }
+    } catch (e) {
+      debug(e.message)
+    }
+  }
 }
 
 /**
@@ -966,7 +1027,7 @@ class ServicesContainer extends SafeContainer {
  */
 
 // NOTES:
-// In contrast to the root containers which hold other containers, an
+// In contrast to the default containers which hold other containers, an
 // NFS container can only hold files, or rather pointers to immutable data.
 // An NFS container cannot hold other containers because it would then
 // be possible to create multiple entries corresponding to a single
@@ -998,19 +1059,16 @@ class NfsContainer extends SafeContainer {
    * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
    */
   constructor (safeJs, nameOrKey, parent, isPublic) {
-    super(safeJs, nameOrKey, nameOrKey, '', parent, nameOrKey)
+    super(safeJs, nameOrKey, nameOrKey, '', parent, nameOrKey, safeJs.SN_TAGTYPE_NFS)
     if (parent) {
-      this._parent = parent
-      this._entryKey = nameOrKey
+      this._parentEntryKey = nameOrKey
     } else {
-      this._parent = undefined
       this._mdName = nameOrKey
       this._isPublic = isPublic
-      this._tagType = safeJs.SN_TAGTYPE_NFS
     }
   }
 
-  isRootContainer () { return false }
+  isDefaultContainer () { return false }
   isPublic () { return this._isPublic }
   isHiddenEntry (key) { return key === '_metadata' } // Some containers have hidden entries (e.g. for metadata)
 
@@ -1025,13 +1083,13 @@ class NfsContainer extends SafeContainer {
 
     try {
       if (this._parent) {
-        let valueVersion = await this._parent.getEntry(this._entryKey)
+        let valueVersion = await this._parent.getEntry(this._parentEntryKey)
         this._mdName = valueVersion.value
       }
 
       this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
     } catch (err) {
-      let info = (this._parent ? this._parent.name + '/' + this._entryKey : this._mdName)
+      let info = (this._parent ? this._parent.name + '/' + this._parentEntryKey : this._mdName)
       debug('NfsContainer failed to init existing MD for ' + info)
       debug(err.message)
     }
@@ -1235,8 +1293,9 @@ class NfsContainer extends SafeContainer {
   }
 }
 
-// Map of SAFE root container name to wrapper class
-const containerClasses = {
+// TODO use these to create list of default permissions to request on auth (bootstrap)
+// Map of SAFE default container names to wrapper class
+const defaultContainers = {
   '_public': PublicContainer,
   '_documents': PrivateContainer,
   '_photos': PrivateContainer,
@@ -1245,8 +1304,13 @@ const containerClasses = {
   '_publicNames': PublicNamesContainer
 }
 
-module.exports.rootContainerNames = rootContainerNames
+// Container classes are all default containers plus...
+const containerClasses = defaultContainers
+containerClasses._services = ServicesContainer
+
+module.exports.defaultContainerNames = defaultContainerNames
 module.exports.containerTypes = containerTypes
+module.exports.defaultContainers = defaultContainers
 module.exports.containerClasses = containerClasses
 module.exports.PublicContainer = PublicContainer
 module.exports.NfsContainer = NfsContainer

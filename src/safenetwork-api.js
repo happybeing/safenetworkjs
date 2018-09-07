@@ -7,7 +7,7 @@
 [ ] Review features and files, perhaps:
   [ ] safenetwork-api.js App auth, access to features (SAFE API, NFS, services etc.)
   [ ] safe-services.js specialist SAFE and generic RESTful services for web app *and* desktop (both via fetch()
-  [ ] safe-containers.js wrappers for root containers with simplified JSON file
+  [ ] safe-containers.js wrappers for default containers with simplified JSON file
       system like interface for each:
     [ ] SafeContainer
       [/] Testing using Safepress2press Safepress3press:
@@ -47,7 +47,15 @@
       [/] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
     [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
-[ ] change to generic JSON interface
+[ ] consider support for empty directories (see: https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895)
+  [ ] one idea: 'ghost' folders held in memory by SafeContainer (wiped on
+      destruction or saved only on the client). Might double as a local FS cache?
+[ ] resume support for LDP, remotestorage etc
+  [ ] revive Sevices support
+  [ ] add RESTful interface to SafeContainer alongside the FS interface
+  [ ] test LDP with Solid Plume
+  [ ] test remotestorage with Litewrite
+[/] change to generic JSON interface
 [ ] move the 'safenetworkjs and safenetwork-web' notes to README.md of both modules
 [ ] get SafenetworkJs working for both desktop and web app
   [/] move safe-cli-boilerplate bootstrap() into safenetworkjs
@@ -272,8 +280,8 @@ class SafenetworkApi {
     this._authOnAccessDenied = false  // Used by simpleAuthorise() and fetch()
 
     // Cached API Objects
-    this._rootContainers = {} // Active SafeContainer objects
-    this._nfsContainers = {}    // Active NfsContainer objects
+    this._defaultContainers = {}  // Active default container objects (PublicContainer/PrivateContainer/PublicNamesContainer)
+    this._nfsContainers = {}      // Active NfsContainer objects
 
     // Application specific configuration required for authorisation
     this._safeAppConfig = {}
@@ -289,11 +297,12 @@ class SafenetworkApi {
     this.protocol = protocol
     this.parentPath = parentPath
 
+    this.SN_TAGTYPE_SERVICES = SN_TAGTYPE_SERVICES
     this.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
     this.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
     this.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
-    this.rootContainerNames = containers.rootContainerNames
+    this.defaultContainerNames = containers.defaultContainerNames
   }
 
   /*
@@ -473,7 +482,7 @@ class SafenetworkApi {
    *  NfsContainer for an NFS emultation Mutable Data
    *  ServicesContainer for a services Mutable Data
    *
-   * In addition to the root containers, ServicesContainer simplifies
+   * In addition to the default containers, ServicesContainer simplifies
    * creation and management of SAFE services Mutable Data (but not yet
    * implemented). Note that there is a separate ServicesInterface class
    * which allows an application to access custom SAFE services with
@@ -481,12 +490,12 @@ class SafenetworkApi {
    */
 
   /**
-   * Get an initialised root container instance
-   * @param  {String} containerName Name of a root container (e.g. '_public')
+   * Get an initialised default container instance
+   * @param  {String} containerName Name of a default container (e.g. '_public')
    * @return {Object}               initialised instance of SafeContainer
    */
   async getSafeContainer (containerName) {
-    let container = this._rootContainers[containerName]
+    let container = this._defaultContainers[containerName]
     if (!container) {
       let ContainerClass = containers.containerClasses[containerName]
       if (ContainerClass) {
@@ -494,7 +503,7 @@ class SafenetworkApi {
         let subTree = containerName               // Default is for path to start with container name
         container = new ContainerClass(this, containerName, containerPath, subTree)
         container.initialise().then((result) => {
-          this._rootContainers[containerName] = container
+          this._defaultContainers[containerName] = container
         }).catch((e) => { debug(e.message); throw e })
       }
     }
@@ -570,7 +579,7 @@ class SafenetworkApi {
     try {
       let useKey = await mData.encryptKey(key)
       let valueVersion = await mData.get(useKey)
-      valueVersion.buf = mData.decrypt(valueVersion.buf)
+      valueVersion.buf = await mData.decrypt(valueVersion.buf)
       return valueVersion
     } catch (err) {
       logApi("getMutableDataValueVersion() WARNING no entry found for key '%s'", key)
@@ -740,42 +749,41 @@ class SafenetworkApi {
   async createPublicName (publicName) {
     logApi('createPublicName(%s)...', publicName)
     try {
-      let createResult = await this._createPublicName(publicName)
-      delete await createResult.servicesMd
+      return this._createPublicName(publicName)
     } catch (err) {
       logApi('Unable to create public name \'' + publicName + '\': ', err)
       throw err
     }
   }
 
-  // Create a new random MutableData for NFS storage, inserts into a root container MD if specified
+  // Create a new random MutableData for NFS storage, inserts into a default container MD if specified
   //
-  // @param {String} rootContainer an empty string, or name of a top level public container (e.g. '_public', '_documents' etc)
+  // @param {String} defaultContainer an empty string, or name of a top level public container (e.g. '_public', '_documents' etc)
   // @param {String} publicName    the public name which owns the container (or '' if none)
   // @param {String} containerName an arbitrary name which may be specified by the user, such as 'root-photos'
   // @param {Number} mdTagType     tag_type for new Mutable Data (currently can only be SN_TAGTYPE_WWW)
   // @param {Boolean} isPrivate    (optional) defaults to false
   //
   // @returns   Promise<NameAndTag>: the name and tag values of the newly created MD
-  async createNfsContainerMd (rootContainer, publicName, containerName, mdTagType, isPrivate) {
-    logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', rootContainer, publicName, containerName, mdTagType, isPrivate)
+  async createNfsContainerMd (defaultContainer, publicName, containerName, mdTagType, isPrivate) {
+    logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', defaultContainer, publicName, containerName, mdTagType, isPrivate)
     try {
       let ownerPart = (publicName !== '' ? '/' + publicName : '') // Usually a folder is associated with a service on a public name
-      let rootKey = rootContainer + '/' + ownerPart + '/' + containerName
+      let key = defaultContainer + '/' + ownerPart + '/' + containerName
 
-      let rootMd
-      if (rootContainer !== '') {
+      let defaultMd
+      if (defaultContainer !== '') {
         // Check the container does not yet exist
-        rootMd = await this.auth.getContainer(rootContainer)
+        defaultMd = await this.auth.getContainer(defaultContainer)
 
         // Check the public container doesn't already exist
         let existingValue = null
         try {
-          existingValue = await this.getMutableDataValue(rootMd, rootKey)
+          existingValue = await this.getMutableDataValue(defaultMd, key)
         } catch (err) {
         } // Ok, key doesn't exist yet
         if (existingValue) {
-          throw new Error("root container '" + rootContainer + "' already has entry with key: '" + rootKey + "'")
+          throw new Error("default container '" + defaultContainer + "' already has entry with key: '" + key + "'")
         }
       }
 
@@ -804,9 +812,9 @@ class SafenetworkApi {
       logLdp('...done.')
       */
 
-      if (rootMd) {
-        // Create an entry in rootContainer (fails if key exists for this container)
-        await this.setMutableDataValue(rootMd, rootKey, nameAndTag.name.buffer)
+      if (defaultMd) {
+        // Create an entry in defaultContainer (fails if key exists for this container)
+        await this.setMutableDataValue(defaultMd, key, nameAndTag.name.buffer)
         this.mutableData.free(mdHandle)
       }
 
@@ -1174,9 +1182,9 @@ class SafenetworkApi {
   */
 
   /**
-   * Test if a standard SAFE root container name is public
-   * @param  {String}  name  the name of a root container ('_public', '_documents' etc)
-   * @return {Boolean}       true if the name is a recognised as a public root container
+   * Test if a standard SAFE default container name is public
+   * @param  {String}  name  the name of a default container ('_public', '_documents' etc)
+   * @return {Boolean}       true if the name is a recognised as a public default container
    */
   isPublicContainer (containerName) {
     // Currently there is only _public
@@ -2618,7 +2626,7 @@ module.exports.ServicesContainer = containers.ServicesContainer
 module.exports.NfsContainer = containers.NfsContainer
 
 // Constants
-module.exports.rootContainerNames = containers.rootContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
+module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
 
 // TODO ??? change to export class, something like this (example rdflib Fetcher.js)
 // class SafenetworkApi {...}
