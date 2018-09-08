@@ -55,6 +55,8 @@
     [/] put FUSE ops on the above for now, but later:
       [/] if poss. move the FUSE ops back into the safenetwork-fuse
           handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
+    [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
+      [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
     [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
 [ ] consider support for empty directories (see: https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895)
   [ ] one idea: 'ghost' folders held in memory by SafeContainer (wiped on
