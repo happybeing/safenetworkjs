@@ -36,13 +36,26 @@
         [ ] create new account for more tests - _publicNames for garbage after an upload
             -> a/c 1 has only one public name but two entries, one of which is garbage
             -> a/c 2 has no public names and no entris
-            [ ] create a/c 3 and upload one public name - check number of entries / garbage?
+            [/] create a/c 3 and upload one public name - check number of entries / garbage?
             I created a/c 3 and using the WHM PoC began adding a public name.
             Before publishing, I listed _publicNames and it contains
             the id 'grouptabs' but also now has a second 'garbage' entry
             like a/c 1. I think a/c 1 used the old WHM (not the PoC).
-            [ ] add more public names and files and use to test more thoroughly
-        [ ] then create cross platform release
+            [ ] add second public name to a/c 3 with files and use to test more thoroughly
+            [ ] add second public name to a/c 3 with files and use to test more thoroughly
+        [ ] then create Linux release:
+          [ ] build executable (Linux)
+          [ ] test executable (Linux)
+          [ ] get people to test
+          [ ] repeat until ready to release:
+          [ ] SafenetworkJs
+            [ ] tag
+            [ ] merge to master
+            [ ] announce
+          [ ] SAFE FUSE
+            [ ] tag
+            [ ] merge to master
+            [ ] announce
       [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
       [ ] implement simplified file interface for example:
         [ ] first consider using file descriptors so that open/read/write/close
