@@ -37,6 +37,10 @@
             -> a/c 1 has only one public name but two entries, one of which is garbage
             -> a/c 2 has no public names and no entris
             [ ] create a/c 3 and upload one public name - check number of entries / garbage?
+            I created a/c 3 and using the WHM PoC began adding a public name.
+            Before publishing, I listed _publicNames and it contains
+            the id 'grouptabs' but also now has a second 'garbage' entry
+            like a/c 1. I think a/c 1 used the old WHM (not the PoC).
             [ ] add more public names and files and use to test more thoroughly
         [ ] then create cross platform release
       [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
