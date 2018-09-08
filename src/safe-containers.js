@@ -508,7 +508,9 @@ class SafeContainer {
           } else if (folderMatch.indexOf(plainKey) === 0) {
             // We've matched the key of a child container, so pass to child
             let matchedChild = await this._getContainerForKey(plainKey)
-            let childList = await matchedChild.listFolder(folderMatch.substring(plainKey.length))
+            let subFolder = folderMatch.substring(plainKey.length)
+            if (subFolder[0] === '/') subFolder = subFolder.substring(1)
+            let childList = await matchedChild.listFolder(subFolder)
             listing = listing.concat(childList)
             debug('%s.listing-3: %o', constructor.name, listing)
           }
@@ -815,7 +817,8 @@ class PublicContainer extends SafeContainer {
    */
   async _createChildContainerForEntry (key) {
     debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
-    return new NfsContainer(this._safeJs, key, this, true)
+    let containerPath = key
+    return new NfsContainer(this._safeJs, key, containerPath, this, true)
   }
 }
 
@@ -880,40 +883,6 @@ class PublicNamesContainer extends SafeContainer {
     return type
   }
 
-  // async itemType (itemPath) {
-  //   debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-  //   let type = containerTypes.notValid
-  //   try {
-  //     let value = await this.getEntryValue(itemPath)
-  //     if (value) {  // itemPath exact match with entry key, so determine entry type for this container
-  //       type = this._entryTypeOf(itemPath)
-  //     } else if (this.isSelf(itemPath)) {
-  //       type = containerTypes.defaultContainer
-  //     } else {
-  //       // Check for services container
-  //       let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
-  //       let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
-  //       if (shortestEnclosingKey) {
-  //         if (shortestEnclosingKey.length !== itemPath.length) {
-  //           type = containerTypes.fakeContainer
-  //         } else {
-  //           type = containerTypes.nfsContainer
-  //         }
-  //       } else {
-  //         // Attempt to call itemType on a child container
-  //         type = await this.callFunctionOnItem(itemPath, 'itemType')
-  //       }
-  //     }
-  //   } catch (error) {
-  //     type = containerTypes.notValid
-  //     debug('file not found')
-  //     debug(error.message)
-  //   }
-  //
-  //   return type
-  // }
-
-
   /**
    * Create a container object of the appropriate class to wrap an MD pointed to an entry in this (parent) container
    *
@@ -969,6 +938,12 @@ class ServicesContainer extends SafeContainer {
     }
   }
 
+  async _createChildContainerForEntry (key) {
+    debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
+    let containerPath = this._parentEntryKey + '/' + key
+    return new NfsContainer(this._safeJs, key, containerPath, this, true)
+  }
+
   /**
    * Create a services MutableData and insert into parent PublicNamesContainer
    * @return {Promise}          a newly created {MutableData}
@@ -994,6 +969,45 @@ class ServicesContainer extends SafeContainer {
     try {
       let itemKey = this._subTree + itemPath
       let value = await this.getEntryValue(itemKey)
+      if (value) {  // itemPath exact match with entry key, so determine entry type for this container
+        type = this._entryTypeOf(itemKey)
+      } else if (this.isSelf(itemPath)) {
+        type = containerTypes.servicesContainer
+      } else {
+        // Attempt to call itemType on a child container
+        type = await this.callFunctionOnItem(itemPath, 'itemType')
+      }
+      // TODO test the above four lines of code with services that
+      //      don't have an NFS container as their value, to see if
+      //      the following stricter code is needed...
+      //
+      // This is a stricter alternative to the above final 'else'
+      // but it may be ok to handle the error.
+      // } else {
+      //   // Check for NFS container
+      //   let serviceKey = itemPath.split('/')[0]
+      //   let serviceProperties = this._safeJs.decodeServiceKey(serviceKey)
+      //   if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
+      //     // Service with container, so pass to child
+      //     debug('%s has a container: %s', itemPath, type)
+      //     return await this.callFunctionOnItem(itemPath, 'itemType')
+      //   }
+    } catch (error) {
+      type = containerTypes.notValid
+      debug('file not found')
+      debug(error.message)
+    }
+
+    return type
+  }
+
+  // This gets service type ok, but not of service container contents
+  async ALT_itemType (itemPath) {
+    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
+    let type = containerTypes.notValid
+    try {
+      let itemKey = this._subTree + itemPath
+      let value = await this.getEntryValue(itemKey)
       if (value) {
         // itemPath exact match with entry key, so determine entry type from the key
         type = this._entryTypeOf(itemKey)
@@ -1008,8 +1022,8 @@ class ServicesContainer extends SafeContainer {
   }
 
   // TODO use safeJs service support when resuming that code
-  _isContainerService (serviceName) {
-    return (serviceName === 'www' || serviceName === 'ldp')
+  _isContainerService (serviceId) {
+    return (serviceId === 'www' || serviceId === 'ldp')
   }
 
   async itemInfo (itemPath) {
@@ -1048,15 +1062,15 @@ class ServicesContainer extends SafeContainer {
         }
       }
 
+      let type = containerTypes.service
       let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
-      if (serviceProperties && this._isContainerService(serviceProperties.name)) {
+      if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
         // Service with container, so pass to child
-        debug('%s has a container: %s', itemPath, containerTypes[type])
+        debug('%s has a container: %s', itemPath, type)
         return await this.callFunctionOnItem(itemPath, 'itemAttributes')
       }
 
       // Service without its own container (or unkown service)
-      let type = containerTypes.service
       debug('%s is type: %s', itemPath, type)
       // Default values (used as is for containerTypes.nfsContainer)
       return {
@@ -1109,11 +1123,12 @@ class NfsContainer extends SafeContainer {
    * [constructor description]
    * @param {SafenetworkJs} safeJs  SafenetworkJS API object
    * @param {String} nameOrKey  MD name, or if a parent container is given, the key of the MD entry containing the name
+   * @param {String} containerPath     where this container appears in the SAFE container tree (e.g. '/_public', '/mds')
    * @param {Object} parent (optional) typically a SafeContainer (ServiceContainer?) but if parent is not defined, nameOrKey must be an XOR address
    * @param {Boolean} isPublic  (defaults to true) used only when creating an MD
    */
-  constructor (safeJs, nameOrKey, parent, isPublic) {
-    super(safeJs, nameOrKey, nameOrKey, '', parent, nameOrKey, safeJs.SN_TAGTYPE_NFS)
+  constructor (safeJs, nameOrKey, containerPath, parent, isPublic) {
+    super(safeJs, nameOrKey, containerPath, '', parent, nameOrKey, safeJs.SN_TAGTYPE_NFS)
     if (parent) {
       this._parentEntryKey = nameOrKey
     } else {
