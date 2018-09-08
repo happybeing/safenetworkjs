@@ -42,12 +42,15 @@
             the id 'grouptabs' but also now has a second 'garbage' entry
             like a/c 1. I think a/c 1 used the old WHM (not the PoC).
             [ ] add second public name to a/c 3 with files and use to test more thoroughly
-            [ ] add second public name to a/c 3 with files and use to test more thoroughly
+            [ ] examing WHM PoC code and:
+              [ ] figure out what the strange 'garbage' entry is in _publicNames
+              [ ] add code to handle, or ignore WebID entries
+        [ ] create SAFE FUSE Linux build for testers
+        [ ] announce SAFE FUSE available to test
+        [ ] fix bugs and repeat
         [ ] then create Linux release:
           [ ] build executable (Linux)
           [ ] test executable (Linux)
-          [ ] get people to test
-          [ ] repeat until ready to release:
           [ ] SafenetworkJs
             [ ] tag
             [ ] merge to master
