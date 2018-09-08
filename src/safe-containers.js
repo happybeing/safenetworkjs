@@ -1222,8 +1222,31 @@ class NfsContainer extends SafeContainer {
   }
 
   async itemType (itemPath) {
-    if (itemPath === '') return containerTypes.nfsContainer
-    return (u.isFolder(itemPath, '/') ? containerTypes.fakeContainer : containerTypes.file)
+    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
+    let type = containerTypes.notValid
+    try {
+      let itemKey = this._subTree + itemPath
+      let value = await this.getEntryValue(itemKey)
+      if (value) {  // itemPath exact match with entry key, so determine entry type for this container
+        type = this._entryTypeOf(itemKey)
+      } else if (this.isSelf(itemPath)) {
+        type = containerTypes.defaultContainer
+      } else {
+        // Check for fakeContainer or NFS container
+        let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
+        let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
+        if (shortestEnclosingKey) {
+          type = containerTypes.fakeContainer
+        }
+      }
+    } catch (error) {
+      type = containerTypes.notValid
+      debug('file not found')
+      debug(error.message)
+    }
+
+    debug('%s is type: ', itemPath, type)
+    return type
   }
 
   async itemAttributes (itemPath) {
@@ -1246,7 +1269,8 @@ class NfsContainer extends SafeContainer {
         return result
       }
 
-      if (!u.isFolder(itemPath, '/')) {
+      let type = await this.itemType(itemPath)
+      if (type === containerTypes.file) {
         // File
         let file = await this.getEntryAsFile(itemPath)
         return {
