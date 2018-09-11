@@ -91,12 +91,12 @@
             [ ] examine WHM PoC code and:
               [ ] figure out what the strange 'garbage' entry is in _publicNames
               [ ] add code to handle, or ignore WebID entries
-            [ ] sanity check public name entries:
+            [/] sanity check public name entries:
               [/] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
               [/] document that requirement in the code and Zim (check if RFC has anything)
-              [ ] add code to validate a public name against this
-              [ ] use isValidKey() when returning public name listFolder()
-              [ ] use isValidKey() when implementing public name mkdir()
+              [/] add code to validate a public name against this
+              [/] use isValidKey() when returning public name listFolder()
+              [/] use isValidKey() when implementing public name mkdir()
             [ ] implement caching in safe-containers.js
               [ ] gather some performance/profiling info (even very crude is good)
               [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
@@ -249,6 +249,15 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
 
 let extraDebug = false
 
+/*
+ * What constitutes a valid public name is not specified in the containers
+ *  RFC, but the Web Hosting Manager example code specifies:
+ *    "Public ID must contain only lowercase alphanumeric characters.
+ *    Should container a min of 3 characters and a max of 62 characters."
+ *
+ * Refs:
+ *  https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
+ */
 // TODO ideally these would be SAFE API constants:
 const PUBLICNAME_MINCHARS = 3
 const PUBLICNAME_MAXCHARS = 62
@@ -977,7 +986,6 @@ class SafenetworkApi {
 
   // Internal version returns a handle which must be freed by the caller
   //
-  // TODO ensure publicName is valid before attempting (eg lowercase, no illegal chars)
   // @param publicName
   //
   // @returns a Promise which resolves to an object containing the new entry's key, value and handle:
