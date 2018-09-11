@@ -9,7 +9,8 @@
   [ ] safe-services.js specialist SAFE and generic RESTful services for web app *and* desktop (both via fetch()
   [ ] safe-containers.js wrappers for default containers with simplified JSON file
       system like interface for each:
-    [ ] SafeContainer
+      First release:
+    [/] SafeContainer
       [/] Testing using Safepress2press Safepress3press:
           - First _public entry is /remotestorage/documents/notes/517F2A9F-5409-49B7-8714-1209B3DE3834
           [/] BUG It trys getattr on _public/documents not _public/remotestorage
@@ -17,23 +18,23 @@
               could just have defaults for when I getEntryValue() fails
     [/]   PublicContainer (_public)
     [/]   PrivateContainer (_music)
-    [ ]     PublicNamesContainer (_publicNames)
-        [ ] add listing of _publicNames
-    [ ]     modify to ignore webidpoc entries
-    [ ]   ServicesContainer
-        [ ] add listing of public name services
---->[ ]   NfsContainer
+    [/]     PublicNamesContainer (_publicNames)
+        [/] add listing of _publicNames
+    [/]     modify to ignore webidpoc entries
+    [/]   ServicesContainer
+        [/] add listing of public name services
+    [/]   NfsContainer
       [/] wire into Public container (by automount when readdir() on its key?)
       [/] update nodejs version and change use of entries forEach to listEntries
-      [ ] ensure all uses of listEntries work correctly (e.g. using push(new Promise()))
-      [ ] first useful release - read only access to _public, including listing file contents:
+      [/] ensure all uses of listEntries work correctly (e.g. using push(new Promise()))
+      [/] first useful release - read only access to _public, including listing file contents:
         [/] add ability to read file content (e.g. cat <somefile>)
           [/] readFileBuf(path)
-        [ ] implement _publicNames
+        [/] implement _publicNames
           [/] listing of public names
           [/] listing of services
-          [ ] listing of files under a service container
-        [ ] create new account for more tests - _publicNames for garbage after an upload
+          [/] listing of files under a service container
+        [/] create new account for more tests - _publicNames for garbage after an upload
             -> a/c 1 has only one public name but two entries, one of which is garbage
             -> a/c 2 has no public names and no entris
             [/] create a/c 3 and upload one public name - check number of entries / garbage?
@@ -45,11 +46,6 @@
             [/] add task.rsapp
             [/] test more thoroughly
             -> Now have two ''garbage' entries!
-          =>[ ] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
-          =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
-              example with a/c 3:
-                ls ~/SAFE/_publicNames/rsapp    # valid
-                ls ~/SAFE/_publicNames/rsappx   # not valid, but fails to error
             [/] cp -R ~/SAFE/_public/rsapp/root-task ~/src/rs/rsapps/taskrs._public
             [/] diff -r ~/src/rs/rsapps/taskrs ~/src/rs/rsapps/taskrs._public
               Some files weren't uploaded by WHM!!! It did give an error :-)...
@@ -76,39 +72,18 @@
             [/] cp -R ~/SAFE/_publicNames/rsapp/task ~/src/rs/rsapps/taskrs._publicNames
             [/] diff -r ~/src/rs/rsapps/taskrs._public ~/src/rs/rsapps/taskrs._publicNames (identical)
             [/] test listing of public names/services on a/c 3
-            [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
-              [ ] re-test listing of public names/services
             [/] add webId (safe://webid.happybeing) on a/c 3 (run Peruse PoC and visit safe://webidea.ter)
-              [ ] re-test listing of public names/services
+              [/] re-test listing of public names/services
                 -> Now hangs due to these new entries
                   safe://_publicNames#happybeing
                   safe://_publicNames#it
-              [ ] put in a general fix so it won't hang!
-              [ ] add support for webIds?
-                [ ] for now just list them and have a dummy readFile() behaviour, but could...
-                [ ] show a file, e.g. happybeing.ttl
-                [ ] readFile() returns the profile in Turtle format (could also show multiple files happybeing.jsonld etc)
-            [ ] examine WHM PoC code and:
-              [ ] figure out what the strange 'garbage' entry is in _publicNames
-              [ ] add code to handle, or ignore WebID entries
+              [/] put in a general fix so it won't hang!
             [/] sanity check public name entries:
               [/] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
               [/] document that requirement in the code and Zim (check if RFC has anything)
               [/] add code to validate a public name against this
               [/] use isValidKey() when returning public name listFolder()
               [/] use isValidKey() when implementing public name mkdir()
-            [ ] implement caching in safe-containers.js
-              [ ] gather some performance/profiling info (even very crude is good)
-              [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
-              First thoughts:
-                - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
-                - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
-                - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
-                - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
-                - implement with a caching on/off flag
-            [ ] re-use of safe-container.js container by searching map by xor address:
-              [ ] implement with on/off flag
-              [ ] compare performance
         [ ] create SAFE FUSE Linux build for testers
         [ ] announce SAFE FUSE available to test
         [ ] fix bugs and repeat
@@ -123,6 +98,35 @@
             [ ] tag
             [ ] merge to master
             [ ] announce
+      [ ] further work
+        [ ] safe-containers.js
+        =>[ ] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
+        =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
+          [ ] add support for webIds? as a new type of container I think
+            [ ] for now just list them and have a dummy readFile() behaviour, but could...
+            [ ] show a file, e.g. happybeing.ttl
+            [ ] readFile() returns the profile in Turtle format (could also show multiple files happybeing.jsonld etc)
+          [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
+            [ ] re-test listing of public names/services
+            example with a/c 3:
+              ls ~/SAFE/_publicNames/rsapp    # valid
+              ls ~/SAFE/_publicNames/rsappx   # not valid, but fails to error
+          [ ] examine WHM PoC code and:
+            [ ] figure out what the strange 'garbage' entry is in _publicNames
+            -> see topic: https://safenetforum.org/t/latest-whm-behaviour-for-use-with-webid-poc/25315/4?u=happybeing
+            [/] add code to handle, or ignore WebID entries
+          [ ] implement caching in safe-containers.js
+            [ ] gather some performance/profiling info (even very crude is good)
+            [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
+            First thoughts:
+              - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
+              - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
+              - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
+              - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
+              - implement with a caching on/off flag
+          [ ] re-use of safe-container.js container by searching map by xor address:
+            [ ] implement with on/off flag
+            [ ] compare performance
       [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
       [ ] implement simplified file interface for example:
         [ ] first consider using file descriptors so that open/read/write/close
@@ -322,9 +326,16 @@ const defaultPerms = {
   // The following defaults have been chosen to allow creation of public names
   // and containers, as required for accessing SAFE web services.
   //
+  // ref: https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
+  //
   // If your app doesn't need those features it can specify only the permissions
   // it needs when calling SafenetworkApi.simpleAuthorise()
   _public: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  _documents: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  _downloads: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  _music: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  _pictures: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  _videos: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _publicNames: ['Read', 'Insert', 'Update', 'Delete'] // TODO maybe reduce defaults later
 }
 
