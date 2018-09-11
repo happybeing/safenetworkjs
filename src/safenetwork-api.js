@@ -46,6 +46,10 @@
             [/] test more thoroughly
             -> Now have two ''garbage' entries!
           =>[ ] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
+          =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
+              example with a/c 3:
+                ls ~/SAFE/_publicNames/rsapp    # valid
+                ls ~/SAFE/_publicNames/rsappx   # not valid, but fails to error
             [/] cp -R ~/SAFE/_public/rsapp/root-task ~/src/rs/rsapps/taskrs._public
             [/] diff -r ~/src/rs/rsapps/taskrs ~/src/rs/rsapps/taskrs._public
               Some files weren't uploaded by WHM!!! It did give an error :-)...

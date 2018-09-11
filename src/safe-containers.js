@@ -452,25 +452,25 @@ class SafeContainer {
   async listFolder (folderPath) {
     debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
-    // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
-    // Only need to check container entries if that fails
-
-    // In some cases the name of the container appears at the start
-    // of the key (e.g. '/_public/happybeing/root-www').
-    // In other such as an NFS container it is just the file name
-    // or possibly a path which could container directory separators
-    // such as 'index.html' or 'images/profile-picture.png'
-
-    // We add this._subTree to the front of the path
-    let folderMatch = this._subTree + folderPath
-
-    // For matching we ignore a trailing '/' so remove if present
-    folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
-
-    let listingQ = []
     let listing = []
     try {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+      // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
+      // Only need to check container entries if that fails
+
+      // In some cases the name of the container appears at the start
+      // of the key (e.g. '/_public/happybeing/root-www').
+      // In other such as an NFS container it is just the file name
+      // or possibly a path which could container directory separators
+      // such as 'index.html' or 'images/profile-picture.png'
+
+      // We add this._subTree to the front of the path
+      let folderMatch = this._subTree + folderPath
+
+      // For matching we ignore a trailing '/' so remove if present
+      folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
+
+      let listingQ = []
       let entries = await this._mData.getEntries()
       let entriesList = await entries.listEntries()
       entriesList.forEach(async (entry) => {
@@ -532,28 +532,30 @@ class SafeContainer {
   async callFunctionOnItem (itemPath, functionName, p1, p2, p3, p4) {
     debug('%s.callFunctionOnItem(%s, %s, %s, %s, %s, %s)', this.constructor.name, itemPath, functionName, p1, p2, p3, p4)
 
-    // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
-    // Only need to check container entries if that fails
-
-    // In some cases the name of the container appears at the start
-    // of the key (e.g. '/_public/happybeing/root-www').
-    // In other such as an NFS container it is just the file name
-    // or possibly a path which could container directory separators
-    // such as 'index.html' or 'images/profile-picture.png'
-
-    // For matching we ignore a trailing '/' so remove if present
-    let itemMatch = (u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length - 1) : itemPath)
-
-    // We add this._subTree to the front of the path
-    itemMatch = this._subTree + itemMatch
-
     let result
     try {
-      return new Promise(async (resolve, reject) => {
-        // TODO remove debug calls (and comment out the value parts until moved elsewhere)
-        let entries = await this._mData.getEntries()
-        let entriesList = await entries.listEntries()
-        entriesList.forEach(async (entry) => {
+      // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
+      // Only need to check container entries if that fails
+
+      // In some cases the name of the container appears at the start
+      // of the key (e.g. '/_public/happybeing/root-www').
+      // In other such as an NFS container it is just the file name
+      // or possibly a path which could container directory separators
+      // such as 'index.html' or 'images/profile-picture.png'
+
+      // For matching we ignore a trailing '/' so remove if present
+      let itemMatch = (u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length - 1) : itemPath)
+
+      // We add this._subTree to the front of the path
+      itemMatch = this._subTree + itemMatch
+
+// ???      return new Promise(async (resolve, reject) => {
+      // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+      let entries = await this._mData.getEntries()
+      let entriesList = await entries.listEntries()
+      let entryQ = []
+      entriesList.forEach(async (entry) => {
+        entryQ.push(new Promise(async (resolve, reject) => {
           if (!result) {
             let decodedEntry = await this._decodeEntry(entry)
             let plainKey = decodedEntry.plainKey
@@ -579,30 +581,29 @@ class SafeContainer {
             //
             // debug('Version: ', entry.value.version)
 
-            if (this.isHiddenEntry(plainKey)) {
-              return // Skip this one
-            }
-
-            // Check it the itemMatch is at the start of the key, and *shorter*
-            if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
-              // Item is the first part of the path after the folder (plus a '/')
-              let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
-              result = this[functionName](item, p1, p2, p3, p4)
-              debug('loop result-1: %o', await result)
-              resolve(result)
-            } else if (itemMatch.indexOf(plainKey) === 0) {
-              // We've matched the key of a child container, so pass to child
-              let matchedChild = await this._getContainerForKey(plainKey)
-              result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p1, p2, p3, p4)
-              debug('loop result-2: %o', await result)
-              resolve(result)
+            if (!this.isHiddenEntry(plainKey)) {
+              // Check it the itemMatch is at the start of the key, and *shorter*
+              if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
+                // Item is the first part of the path after the folder (plus a '/')
+                let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
+                result = this[functionName](item, p1, p2, p3, p4)
+                debug('loop result-1: %o', await result)
+                resolve(result)
+              } else if (itemMatch.indexOf(plainKey) === 0) {
+                // We've matched the key of a child container, so pass to child
+                let matchedChild = await this._getContainerForKey(plainKey)
+                result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p1, p2, p3, p4)
+                debug('loop result-2: %o', await result)
+                resolve(result)
+              }
             }
           }
-        })
-      }).catch((e) => {
-        debug('ERROR: %s.callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
-        debug(e.message)
+          resolve(undefined)
+        }))
       })
+      await Promise.all(entryQ).catch((e) => debug(e.message))
+      debug('%s.call returning result: %o', constructor.name, result)
+      return result
     } catch (e) {
       debug('ERROR: %s.callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
       debug(e.message)
@@ -671,7 +672,7 @@ class SafeContainer {
       debug('file not found')
       debug(error.message)
     }
-
+    debug('itemType(%s) returning: ', type)
     return type
   }
 
