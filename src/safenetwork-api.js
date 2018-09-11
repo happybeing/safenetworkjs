@@ -92,11 +92,11 @@
               [ ] figure out what the strange 'garbage' entry is in _publicNames
               [ ] add code to handle, or ignore WebID entries
             [ ] sanity check public name entries:
-              [ ] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
-              [ ] document that requirement in the code and Zim (check if RFC has anything)
+              [/] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
+              [/] document that requirement in the code and Zim (check if RFC has anything)
               [ ] add code to validate a public name against this
-              [ ] use isValidPublicName() when returning public name listFolder()
-              [ ] use isValidPublicName() when implementing public name mkdir()
+              [ ] use isValidKey() when returning public name listFolder()
+              [ ] use isValidKey() when implementing public name mkdir()
             [ ] implement caching in safe-containers.js
               [ ] gather some performance/profiling info (even very crude is good)
               [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
@@ -132,6 +132,7 @@
         [ ] saveFile(path, [create])
         [ ] fileExists(path)
         [ ] deleteFile(path)
+        [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
         [ ] support empty folders by creating a placeholder file:
         [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
         always points to an immutable data which contains the text
@@ -247,6 +248,11 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
 }
 
 let extraDebug = false
+
+// TODO ideally these would be SAFE API constants:
+const PUBLICNAME_MINCHARS = 3
+const PUBLICNAME_MAXCHARS = 62
+const BADPUBLICNAME_MSG = 'must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters.'
 
 // TODO get these from the API safeApi.CONSTANTS (see web_hosting_manager/app/safenet_comm/api.js for examples)
 // See https://github.com/maidsafe/safe_app_nodejs/blob/9b3a263cade8315370422400561088495d3ec5d9/src/consts.js#L85-L95
@@ -952,6 +958,23 @@ class SafenetworkApi {
     return serviceValue
   }
 
+  /**
+   * Check if the string is suitable for use as a public name
+   *
+   * @param  {[type]}  name
+   * @return {Boolean}      true if the length and characters suitable
+   */
+  isValidPublicName (name) {
+    // From the WHM code (not specified in the containers RFC)
+    if (name &&
+        name.length >= PUBLICNAME_MINCHARS &&
+        name.length <= PUBLICNAME_MAXCHARS &&
+        name.match(/^[a-z0-9]*$/)) {
+      return true
+    }
+    return false
+  }
+
   // Internal version returns a handle which must be freed by the caller
   //
   // TODO ensure publicName is valid before attempting (eg lowercase, no illegal chars)
@@ -964,6 +987,8 @@ class SafenetworkApi {
   async _createPublicName (publicName) {
     logApi('_createPublicName(%s)...', publicName)
     try {
+      if (!this.isValidPublicName(publicName)) throw new Error('A public name ' + BADPUBLICNAME_MSG)
+
       // Check for an existing entry (before creating services MD)
       let entry = null
       try {
@@ -973,6 +998,7 @@ class SafenetworkApi {
       if (entry) {
         throw new Error("Can't create _publicNames entry, already exists for `" + publicName + "'")
       }
+
       // Create a new services MD (fails if the publicName is taken)
       // Do this before updating _publicNames and even if that fails, we
       // still own the name so TODO check here first, if one exists that we own
@@ -1364,6 +1390,10 @@ class SafenetworkApi {
     }
     return result
   }
+
+  // Use same check as for public names
+  isValidSubdomain (name) { return this.isValidPublicName(name) }
+  isValidServiceId (name) { return this.isValidPublicName(name) }
 
   // ////// TODO END of 'move to Service class/implementation'
 
