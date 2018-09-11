@@ -41,10 +41,70 @@
             Before publishing, I listed _publicNames and it contains
             the id 'grouptabs' but also now has a second 'garbage' entry
             like a/c 1. I think a/c 1 used the old WHM (not the PoC).
-            [ ] add second public name to a/c 3 with files and use to test more thoroughly
-            [ ] examing WHM PoC code and:
+            [/] add second public name to a/c 3 with files and use
+            [/] add task.rsapp
+            [/] test more thoroughly
+            -> Now have two ''garbage' entries!
+          =>[ ] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
+            [/] cp -R ~/SAFE/_public/rsapp/root-task ~/src/rs/rsapps/taskrs._public
+            [/] diff -r ~/src/rs/rsapps/taskrs ~/src/rs/rsapps/taskrs._public
+              Some files weren't uploaded by WHM!!! It did give an error :-)...
+                Only in /home/mrh/src/rs/rsapps/taskrs: bower_components
+                Only in /home/mrh/src/rs/rsapps/taskrs: build
+                Only in /home/mrh/src/rs/rsapps/taskrs._public/css: all.css
+                Only in /home/mrh/src/rs/rsapps/taskrs/css: app.less
+                Only in /home/mrh/src/rs/rsapps/taskrs: .eslintrc
+                Only in /home/mrh/src/rs/rsapps/taskrs._public: fonts
+                Only in /home/mrh/src/rs/rsapps/taskrs: .git
+                Only in /home/mrh/src/rs/rsapps/taskrs: .gitignore
+                Only in /home/mrh/src/rs/rsapps/taskrs._public: index.html
+                Only in /home/mrh/src/rs/rsapps/taskrs._public/js: all.js
+                Only in /home/mrh/src/rs/rsapps/taskrs/js: app.js
+                Only in /home/mrh/src/rs/rsapps/taskrs/js: model.js
+                Only in /home/mrh/src/rs/rsapps/taskrs/js: utils.js
+                Only in /home/mrh/src/rs/rsapps/taskrs: LICENSE
+                Only in /home/mrh/src/rs/rsapps/taskrs: Makefile
+                Only in /home/mrh/src/rs/rsapps/taskrs: node_modules
+                Only in /home/mrh/src/rs/rsapps/taskrs: npm-debug.log
+                Only in /home/mrh/src/rs/rsapps/taskrs: README.md
+                Only in /home/mrh/src/rs/rsapps/taskrs: site
+                Only in /home/mrh/src/rs/rsapps/taskrs: .travis.yml
+            [/] cp -R ~/SAFE/_publicNames/rsapp/task ~/src/rs/rsapps/taskrs._publicNames
+            [/] diff -r ~/src/rs/rsapps/taskrs._public ~/src/rs/rsapps/taskrs._publicNames (identical)
+            [/] test listing of public names/services on a/c 3
+            [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
+              [ ] re-test listing of public names/services
+            [/] add webId (safe://webid.happybeing) on a/c 3 (run Peruse PoC and visit safe://webidea.ter)
+              [ ] re-test listing of public names/services
+                -> Now hangs due to these new entries
+                  safe://_publicNames#happybeing
+                  safe://_publicNames#it
+              [ ] put in a general fix so it won't hang!
+              [ ] add support for webIds?
+                [ ] for now just list them and have a dummy readFile() behaviour, but could...
+                [ ] show a file, e.g. happybeing.ttl
+                [ ] readFile() returns the profile in Turtle format (could also show multiple files happybeing.jsonld etc)
+            [ ] examine WHM PoC code and:
               [ ] figure out what the strange 'garbage' entry is in _publicNames
               [ ] add code to handle, or ignore WebID entries
+            [ ] sanity check public name entries:
+              [ ] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
+              [ ] document that requirement in the code and Zim (check if RFC has anything)
+              [ ] add code to validate a public name against this
+              [ ] use isValidPublicName() when returning public name listFolder()
+              [ ] use isValidPublicName() when implementing public name mkdir()
+            [ ] implement caching in safe-containers.js
+              [ ] gather some performance/profiling info (even very crude is good)
+              [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
+              First thoughts:
+                - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
+                - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
+                - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
+                - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
+                - implement with a caching on/off flag
+            [ ] re-use of safe-container.js container by searching map by xor address:
+              [ ] implement with on/off flag
+              [ ] compare performance
         [ ] create SAFE FUSE Linux build for testers
         [ ] announce SAFE FUSE available to test
         [ ] fix bugs and repeat
