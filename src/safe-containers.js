@@ -846,11 +846,6 @@ class PrivateContainer extends SafeContainer {
  * Simplified access to the _publicNames container, including a file system API
  * @extends SafeContainer
  *
- *  What constitutes a valid public name is not specified in the containers
- *  RFC, but the Web Hosting Manager example code specifies:
- *    "Public ID must contain only lowercase alphanumeric characters.
- *    Should container a min of 3 characters and a max of 62 characters."
- *
  * Refs:
  *  https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
  */
@@ -1032,26 +1027,6 @@ class ServicesContainer extends SafeContainer {
     } catch (error) {
       type = containerTypes.notValid
       debug('file not found')
-      debug(error.message)
-    }
-
-    return type
-  }
-
-  // This gets service type ok, but not of service container contents
-  async ALT_itemType (itemPath) {
-    debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.notValid
-    try {
-      let itemKey = this._subTree + itemPath
-      let value = await this.getEntryValue(itemKey)
-      if (value) {
-        // itemPath exact match with entry key, so determine entry type from the key
-        type = this._entryTypeOf(itemKey)
-      }
-    } catch (error) {
-      type = containerTypes.notValid
-      debug('service not found: ', itemPath)
       debug(error.message)
     }
 
