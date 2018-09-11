@@ -212,12 +212,12 @@ class SafeContainer {
   isPublic () { return true }
   isSelf (itemPath) { return itemPath === '' }  // Empty path is equivalent to '.'
 
-  // TODO implement isInvalidKey() here for default folders, and override in other containers where needed
-  isInvalidKey (key) { return false }           // Containers should sanity check keys in case of corruption
-                                                // but still cope with a valid key that has an invalid value
+  // TODO implement isValidKey() here for default folders, and override in other containers where needed
+  isValidKey (key) { return true }          // Containers should sanity check keys in case of corruption
+                                            // but still cope with a valid key that has an invalid value
   isHiddenEntry (key) {
     return key === '_metadata' || // Containers for which this is not hidden should override
-           this.isInvalidKey(key)
+           !this.isValidKey(key)
   }
 
   encryptKeys () { return this._encryptKeys === true }
@@ -487,8 +487,6 @@ class SafeContainer {
             resolve()
             return // Skip this one
           }
-          // TODO remove temp skip of strange entry in _publicNames:
-//          if (plainKey[0] !== '_' && !plainKey[0].match(/^[0-9a-z]+$/)) { resolve(); return }
 
           if (folderMatch === '') { // Check if the folderMatch is root of the key
             // Item is the first part of the path
@@ -844,6 +842,18 @@ class PrivateContainer extends SafeContainer {
   isPublic () { return false }
 }
 
+/**
+ * Simplified access to the _publicNames container, including a file system API
+ * @extends SafeContainer
+ *
+ *  What constitutes a valid public name is not specified in the containers
+ *  RFC, but the Web Hosting Manager example code specifies:
+ *    "Public ID must contain only lowercase alphanumeric characters.
+ *    Should container a min of 3 characters and a max of 62 characters."
+ *
+ * Refs:
+ *  https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
+ */
 class PublicNamesContainer extends SafeContainer {
   /**
    * @param {Object} safeJs  SafenetworkApi (owner)
@@ -861,6 +871,15 @@ class PublicNamesContainer extends SafeContainer {
   _entryTypeOf (key) {
     return containerTypes.servicesContainer
   }
+
+  // Containers should sanity check keys in case of corruption
+  // but still cope with a valid key that has an invalid value
+  //
+  isValidKey (key) {
+    return this._safeJs.isValidPublicName(key)
+  }
+
+  isHiddenKey (key) { return super.isHiddenKey(key) || !this.isValidKey(key) }
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
@@ -959,6 +978,23 @@ class ServicesContainer extends SafeContainer {
   //      in safeJs (see setupServiceForHost)
 
   // TODO add methods to access existing service entries (e.g. enumerate, get by name)
+
+  // Containers should sanity check keys in case of corruption
+  // but still cope with a valid key that has an invalid value
+  //
+  isValidKey (key) {
+    let decodedKey = this._safeJs.decodeServiceKey(key)
+
+    return this._safeJs.isValidSubdomain(decodedKey.hostProfile) &&
+           this._safeJs.isValidServiceId(decodedKey.serviceId)
+  }
+
+  isValidServiceName (name) { return this._safeJs.isValidServiceName(name) }
+
+  isHiddenKey (key) {
+    return super.isHiddenKey(key) ||
+    !this.isValidKey(key)
+  }
 
   _entryTypeOf (key) {
     return containerTypes.service
