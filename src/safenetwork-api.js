@@ -117,7 +117,8 @@
             [/] add code to handle, or ignore WebID entries
           [ ] implement caching in safe-containers.js
             [ ] gather some performance/profiling info (even very crude is good)
-            [ ] review info from Maidsafe on API GET use, see https://forum.safedev.org/t/what-in-the-api-causes-get/2008?u=happybeing
+            [ ] review info from Maidsafe on API GET use
+                see https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
             First thoughts:
               - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
               - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
