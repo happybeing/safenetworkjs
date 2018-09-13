@@ -78,7 +78,8 @@ Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
     uri = await ipcReceive(String(process.pid))
   }
 
-  return Safe.fromAuthUri(appInfo, uri, null, options)
+  // TODO revert to safe-node-app v0.9.1: call fromAuthUri() instead of fromAuthURI()
+  return Safe.fromAuthURI(appInfo, uri, null, options)
 }
 
 async function authorise (pid, appInfo, appContainers, containerOpts, options) {
@@ -91,8 +92,10 @@ async function authorise (pid, appInfo, appContainers, containerOpts, options) {
       '--uri'
     ]
   }
-
-  const app = await Safe.initialiseApp(appInfo, undefined, options)
+  debug('call Safe.initializeApp()...')
+  // TODO revert to safe-node-app v0.9.1: call initialiseApp() instead of initializeApp()
+  const app = await Safe.initializeApp(appInfo, undefined, options)
+  debug('call app.auth.genAuthUri()...')
   const uri = await app.auth.genAuthUri(appContainers, containerOpts)
 
   debug('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo) +

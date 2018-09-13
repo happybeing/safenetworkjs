@@ -411,6 +411,12 @@ class SafeContainer {
    * @param  {Object}  options [optional] when omitted, decode key and value, otherwise depends on properties of decodeKey and decodeValue
    * @return {Promise}         [description]
    */
+  // TODO delete this safe-node-app v0.8.1 version:
+  async _decodeEntry081 (key, val, options) {
+    let entry = {'key': key, 'value': val}
+    return this._decodeEntry(entry, options)
+  }
+
   async _decodeEntry (entry, options) {
     let decodedEntry = entry
     try {
@@ -449,6 +455,18 @@ class SafeContainer {
    * @return {Promise}            list of sub-folder names at folderPath
    */
 
+  // Simulate safe-node-app v0.9.1 function:
+  async _listEntriesHack (entries) {
+    let entriesList = []
+    try {
+      await entries.forEach((key, val) => {
+        entriesList.push({'key': key, 'value': val})
+      })
+    } catch (e) { debug(e) }
+    debug('entriesList: %O', entriesList)
+    return entriesList
+  }
+
   async listFolder (folderPath) {
     debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
@@ -472,10 +490,100 @@ class SafeContainer {
 
       let listingQ = []
       let entries = await this._mData.getEntries()
-      let entriesList = await entries.listEntries()
+      // TODO revert to safe-node-app v0.9.1 code:
+      // let entriesList = await entries.listEntries()
+      // TODO remove safe-node-app v0.8.1 code:
+      let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
         listingQ.push(new Promise(async (resolve, reject) => {
           let decodedEntry = await this._decodeEntry(entry)
+          let plainKey = decodedEntry.plainKey
+
+        // For matching we ignore a trailing '/' so remove if present
+          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+          debug('Match Key      : ', matchKey)
+          debug('Folder Match   : ', folderMatch)
+          // Some containers don't list all entries (e.g. if they holdd metadata)
+          if (this.isHiddenEntry(plainKey)) {
+            resolve()
+            return // Skip this one
+          }
+
+          if (folderMatch === '') { // Check if the folderMatch is root of the key
+            // Item is the first part of the path
+            let item = plainKey.split('/')[0]
+            if (item && item.length && listing.indexOf(item) === -1) {
+              debug('listing-1.push(\'%s\')', item)
+              listing.push(item)
+            }
+          } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
+            // As the folderMatch is at the start of the key, and *shorter*,
+            // item is the first part of the path after the folder (plus a '/')
+            let item = plainKey.substring(folderMatch.length).split('/')[1]
+            if (item && item.length && listing.indexOf(item) === -1) {
+              debug('listing-2.push(\'%s\')', item)
+              listing.push(item)
+            }
+          } else if (folderMatch.indexOf(plainKey) === 0) {
+            // We've matched the key of a child container, so pass to child
+            let matchedChild = await this._getContainerForKey(plainKey)
+            let subFolder = folderMatch.substring(plainKey.length)
+            if (subFolder[0] === '/') subFolder = subFolder.substring(1)
+            let childList = await matchedChild.listFolder(subFolder)
+            listing = listing.concat(childList)
+            debug('%s.listing-3: %o', constructor.name, listing)
+          }
+          resolve() // Resolve the entry's promise
+        }).catch((e) => debug(e.message)))
+      })
+      await Promise.all(listingQ).catch((e) => debug(e.message))
+      debug('%s.listing-4-END: %o', constructor.name, listing)
+      return listing
+    } catch (e) {
+      debug(e.message)
+      debug('ERROR %s.listFolder(\'%s\') failed')
+    }
+
+    debug('%s.listing-5-END: %o', constructor.name, listing)
+    return listing
+  }
+
+  async listFolder_FIRSTATTEMPT (folderPath) {
+    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
+
+    let listing = []
+    try {
+      // TODO remove debug calls (and comment out the value parts until moved elsewhere)
+      // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
+      // Only need to check container entries if that fails
+
+      // In some cases the name of the container appears at the start
+      // of the key (e.g. '/_public/happybeing/root-www').
+      // In other such as an NFS container it is just the file name
+      // or possibly a path which could container directory separators
+      // such as 'index.html' or 'images/profile-picture.png'
+
+      // We add this._subTree to the front of the path
+      let folderMatch = this._subTree + folderPath
+
+      // For matching we ignore a trailing '/' so remove if present
+      folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
+
+      // TODO remove safe-node-app v0.8.1 code:
+      // TODO revert to safe-node-app v0.9.1 code:
+      let listingQ = []
+      // TODO remove safe-node-app v0.8.1 code:
+      let entries = await this._mData.getEntries()
+      entries.forEach(async (key, val) => {
+        listingQ.push(new Promise(async (resolve, reject) => {
+          let decodedEntry = await this._decodeEntry081(key, val)
+
+      // TODO revert to safe-node-app v0.9.1 code:
+      // let entries = await this._mData.getEntries()
+      // let entriesList = await entries.listEntries()
+      // entriesList.forEach(async (entry) => {
+        // listingQ.push(new Promise(async (resolve, reject) => {
+        //   let decodedEntry = await this._decodeEntry(entry)
           let plainKey = decodedEntry.plainKey
 
         // For matching we ignore a trailing '/' so remove if present
@@ -550,7 +658,10 @@ class SafeContainer {
 // ???      return new Promise(async (resolve, reject) => {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       let entries = await this._mData.getEntries()
-      let entriesList = await entries.listEntries()
+      // TODO revert to safe-node-app v0.9.1 code:
+      // let entriesList = await entries.listEntries()
+      // TODO remove safe-node-app v0.8.1 code:
+      let entriesList = await this._listEntriesHack(entries)
       let entryQ = []
       entriesList.forEach(async (entry) => {
         entryQ.push(new Promise(async (resolve, reject) => {
@@ -687,7 +798,10 @@ class SafeContainer {
     let resultQ = []
     try {
       let entries = await this._mData.getEntries()
-      let entriesList = await entries.listEntries()
+      // TODO revert to safe-node-app v0.9.1 code:
+      // let entriesList = await entries.listEntries()
+      // TODO remove safe-node-app v0.8.1 code:
+      let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
         resultQ.push(new Promise(async (resolve, reject) => {
           let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
