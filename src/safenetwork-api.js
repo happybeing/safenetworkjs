@@ -84,8 +84,19 @@
               [/] add code to validate a public name against this
               [/] use isValidKey() when returning public name listFolder()
               [/] use isValidKey() when implementing public name mkdir()
-        [ ] create SAFE FUSE Linux build for testers
-        [ ] announce SAFE FUSE available to test
+        [/] create SAFE FUSE Linux build for testers
+        [/] announce SAFE FUSE available to test
+          See: https://forum.safedev.org/t/safe-fuse-help-with-testing/2019/4?u=happybeing
+        [ ] update the README.md with instructions for:
+          [ ] users
+          [ ] development
+          [ ] development debugging
+          [ ] build for Linux
+          [ ] packaged Linux debugging
+          [ ] build for Windows (benno?)
+          [ ] packaged Windows debugging (benno?)
+          [ ] build for Mac OS (tmark?)
+          [ ] packaged Mac OS debugging (tmark?)
         [ ] fix bugs and repeat
         [ ] then create Linux release:
           [ ] build executable (Linux)
@@ -386,10 +397,12 @@ class SafenetworkApi {
     // An app can install additional services as needed
     // TODO update:
     // this.setServiceImplementation(new SafeServiceWww(this)) // A default service for www (passive)
-    this.setServiceImplementation(new SafeServiceLDP(this))
+    // TODO revive:
+    // this.setServiceImplementation(new SafeServiceLDP(this))
   }
 
   initialise () {
+    logApi('%s.initialise()', this.constructor.name)
     // TODO implement delete any active services (and their handles)
 
     // SAFE Network Services
