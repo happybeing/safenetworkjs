@@ -1,169 +1,170 @@
 /* TODO theWebalyst:
-[ ] issue #1: implement JSDocs or similar across the code
 [/] npm link for development of safenetwork-fuse
 [x] get simple auth working so safenetwork-fuse auths with mock
   -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setApp()
-[ ] migrate features from safenetwork-webapi to:
-[ ] Review features and files, perhaps:
-  [ ] safenetwork-api.js App auth, access to features (SAFE API, NFS, services etc.)
-  [ ] safe-services.js specialist SAFE and generic RESTful services for web app *and* desktop (both via fetch()
-  [ ] safe-containers.js wrappers for default containers with simplified JSON file
-      system like interface for each:
-      First release:
-    [/] SafeContainer
-      [/] Testing using Safepress2press Safepress3press:
-          - First _public entry is /remotestorage/documents/notes/517F2A9F-5409-49B7-8714-1209B3DE3834
-          [/] BUG It trys getattr on _public/documents not _public/remotestorage
-          [/] BUG Need to detect pseudo folder /remotestorage etc and handle different from the full entry
-              could just have defaults for when I getEntryValue() fails
-    [/]   PublicContainer (_public)
-    [/]   PrivateContainer (_music)
-    [/]     PublicNamesContainer (_publicNames)
-        [/] add listing of _publicNames
-    [/]     modify to ignore webidpoc entries
-    [/]   ServicesContainer
-        [/] add listing of public name services
-    [/]   NfsContainer
-      [/] wire into Public container (by automount when readdir() on its key?)
-      [/] update nodejs version and change use of entries forEach to listEntries
-      [/] ensure all uses of listEntries work correctly (e.g. using push(new Promise()))
-      [/] first useful release - read only access to _public, including listing file contents:
-        [/] add ability to read file content (e.g. cat <somefile>)
-          [/] readFileBuf(path)
-        [/] implement _publicNames
-          [/] listing of public names
-          [/] listing of services
-          [/] listing of files under a service container
-        [/] create new account for more tests - _publicNames for garbage after an upload
-            -> a/c 1 has only one public name but two entries, one of which is garbage
-            -> a/c 2 has no public names and no entris
-            [/] create a/c 3 and upload one public name - check number of entries / garbage?
-            I created a/c 3 and using the WHM PoC began adding a public name.
-            Before publishing, I listed _publicNames and it contains
-            the id 'grouptabs' but also now has a second 'garbage' entry
-            like a/c 1. I think a/c 1 used the old WHM (not the PoC).
-            [/] add second public name to a/c 3 with files and use
-            [/] add task.rsapp
-            [/] test more thoroughly
-            -> Now have two ''garbage' entries!
-            [/] cp -R ~/SAFE/_public/rsapp/root-task ~/src/rs/rsapps/taskrs._public
-            [/] diff -r ~/src/rs/rsapps/taskrs ~/src/rs/rsapps/taskrs._public
-              Some files weren't uploaded by WHM!!! It did give an error :-)...
-                Only in /home/mrh/src/rs/rsapps/taskrs: bower_components
-                Only in /home/mrh/src/rs/rsapps/taskrs: build
-                Only in /home/mrh/src/rs/rsapps/taskrs._public/css: all.css
-                Only in /home/mrh/src/rs/rsapps/taskrs/css: app.less
-                Only in /home/mrh/src/rs/rsapps/taskrs: .eslintrc
-                Only in /home/mrh/src/rs/rsapps/taskrs._public: fonts
-                Only in /home/mrh/src/rs/rsapps/taskrs: .git
-                Only in /home/mrh/src/rs/rsapps/taskrs: .gitignore
-                Only in /home/mrh/src/rs/rsapps/taskrs._public: index.html
-                Only in /home/mrh/src/rs/rsapps/taskrs._public/js: all.js
-                Only in /home/mrh/src/rs/rsapps/taskrs/js: app.js
-                Only in /home/mrh/src/rs/rsapps/taskrs/js: model.js
-                Only in /home/mrh/src/rs/rsapps/taskrs/js: utils.js
-                Only in /home/mrh/src/rs/rsapps/taskrs: LICENSE
-                Only in /home/mrh/src/rs/rsapps/taskrs: Makefile
-                Only in /home/mrh/src/rs/rsapps/taskrs: node_modules
-                Only in /home/mrh/src/rs/rsapps/taskrs: npm-debug.log
-                Only in /home/mrh/src/rs/rsapps/taskrs: README.md
-                Only in /home/mrh/src/rs/rsapps/taskrs: site
-                Only in /home/mrh/src/rs/rsapps/taskrs: .travis.yml
-            [/] cp -R ~/SAFE/_publicNames/rsapp/task ~/src/rs/rsapps/taskrs._publicNames
-            [/] diff -r ~/src/rs/rsapps/taskrs._public ~/src/rs/rsapps/taskrs._publicNames (identical)
-            [/] test listing of public names/services on a/c 3
-            [/] add webId (safe://webid.happybeing) on a/c 3 (run Peruse PoC and visit safe://webidea.ter)
-              [/] re-test listing of public names/services
-                -> Now hangs due to these new entries
-                  safe://_publicNames#happybeing
-                  safe://_publicNames#it
-              [/] put in a general fix so it won't hang!
-            [/] sanity check public name entries:
-              [/] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
-              [/] document that requirement in the code and Zim (check if RFC has anything)
-              [/] add code to validate a public name against this
-              [/] use isValidKey() when returning public name listFolder()
-              [/] use isValidKey() when implementing public name mkdir()
-        [/] create SAFE FUSE Linux build for testers
-        [/] announce SAFE FUSE available to test
-          See: https://forum.safedev.org/t/safe-fuse-help-with-testing/2019/4?u=happybeing
-        [ ] update the README.md with instructions for:
-          [/] users
-          [/] development
-          [/] development debugging
-          [/] build for Linux
-          [/] packaged Linux debugging
-          [ ] build for Windows (benno?)
-          [ ] packaged Windows debugging (benno?)
-          [ ] build for Mac OS (tmark?)
-          [ ] packaged Mac OS debugging (tmark?)
-        [ ] fix bugs and repeat
-        [ ] then create Linux release:
-          [/] build executable (Linux)
-          [/] test executable (Linux)
-          [/] SafenetworkJs v0.1.0
-            [/] tag
-            [/] merge to master
-            [/] announce
-          [/] SAFE FUSE v0.1.0
-            [/] tag
-            [/] merge to master
-            [/] announce
-      [ ] further work
-        [ ] safe-containers.js
+[/] First release v0.1.0:
+    safe-containers.js wrappers for default containers with simplified JSON
+    file system like interface for each:
+  [/] SafeContainer
+    [/] Testing using Safepress2press Safepress3press:
+        - First _public entry is /remotestorage/documents/notes/517F2A9F-5409-49B7-8714-1209B3DE3834
+        [/] BUG It trys getattr on _public/documents not _public/remotestorage
+        [/] BUG Need to detect pseudo folder /remotestorage etc and handle different from the full entry
+            could just have defaults for when I getEntryValue() fails
+  [/] put FUSE ops on the above for now, but later:
+    [/] if poss. move the FUSE ops back into the safenetwork-fuse
+        handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
+  [/]   PublicContainer (_public)
+  [/]   PrivateContainer (_music)
+  [/]     PublicNamesContainer (_publicNames)
+      [/] add listing of _publicNames
+  [/]     modify to ignore webidpoc entries
+  [/]   ServicesContainer
+      [/] add listing of public name services
+  [/]   NfsContainer
+    [/] wire into Public container (by automount when readdir() on its key?)
+    [/] update nodejs version and change use of entries forEach to listEntries
+    [/] ensure all uses of listEntries work correctly (e.g. using push(new Promise()))
+    [/] first useful release - read only access to _public, including listing file contents:
+      [/] add ability to read file content (e.g. cat <somefile>)
+        [/] readFileBuf(path)
+      [/] implement _publicNames
+        [/] listing of public names
+        [/] listing of services
+        [/] listing of files under a service container
+      [/] create new account for more tests - _publicNames for garbage after an upload
+          -> a/c 1 has only one public name but two entries, one of which is garbage
+          -> a/c 2 has no public names and no entris
+          [/] create a/c 3 and upload one public name - check number of entries / garbage?
+          I created a/c 3 and using the WHM PoC began adding a public name.
+          Before publishing, I listed _publicNames and it contains
+          the id 'grouptabs' but also now has a second 'garbage' entry
+          like a/c 1. I think a/c 1 used the old WHM (not the PoC).
+          [/] add second public name to a/c 3 with files and use
+          [/] add task.rsapp
+          [/] test more thoroughly
+          -> Now have two ''garbage' entries!
+          [/] cp -R ~/SAFE/_public/rsapp/root-task ~/src/rs/rsapps/taskrs._public
+          [/] diff -r ~/src/rs/rsapps/taskrs ~/src/rs/rsapps/taskrs._public
+            Some files weren't uploaded by WHM!!! It did give an error :-)...
+              Only in /home/mrh/src/rs/rsapps/taskrs: bower_components
+              Only in /home/mrh/src/rs/rsapps/taskrs: build
+              Only in /home/mrh/src/rs/rsapps/taskrs._public/css: all.css
+              Only in /home/mrh/src/rs/rsapps/taskrs/css: app.less
+              Only in /home/mrh/src/rs/rsapps/taskrs: .eslintrc
+              Only in /home/mrh/src/rs/rsapps/taskrs._public: fonts
+              Only in /home/mrh/src/rs/rsapps/taskrs: .git
+              Only in /home/mrh/src/rs/rsapps/taskrs: .gitignore
+              Only in /home/mrh/src/rs/rsapps/taskrs._public: index.html
+              Only in /home/mrh/src/rs/rsapps/taskrs._public/js: all.js
+              Only in /home/mrh/src/rs/rsapps/taskrs/js: app.js
+              Only in /home/mrh/src/rs/rsapps/taskrs/js: model.js
+              Only in /home/mrh/src/rs/rsapps/taskrs/js: utils.js
+              Only in /home/mrh/src/rs/rsapps/taskrs: LICENSE
+              Only in /home/mrh/src/rs/rsapps/taskrs: Makefile
+              Only in /home/mrh/src/rs/rsapps/taskrs: node_modules
+              Only in /home/mrh/src/rs/rsapps/taskrs: npm-debug.log
+              Only in /home/mrh/src/rs/rsapps/taskrs: README.md
+              Only in /home/mrh/src/rs/rsapps/taskrs: site
+              Only in /home/mrh/src/rs/rsapps/taskrs: .travis.yml
+          [/] cp -R ~/SAFE/_publicNames/rsapp/task ~/src/rs/rsapps/taskrs._publicNames
+          [/] diff -r ~/src/rs/rsapps/taskrs._public ~/src/rs/rsapps/taskrs._publicNames (identical)
+          [/] test listing of public names/services on a/c 3
+          [/] add webId (safe://webid.happybeing) on a/c 3 (run Peruse PoC and visit safe://webidea.ter)
+            [/] re-test listing of public names/services
+              -> Now hangs due to these new entries
+                safe://_publicNames#happybeing
+                safe://_publicNames#it
+            [/] put in a general fix so it won't hang!
+          [/] sanity check public name entries:
+            [/] search WHM for "Public ID must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters."
+            [/] document that requirement in the code and Zim (check if RFC has anything)
+            [/] add code to validate a public name against this
+            [/] use isValidKey() when returning public name listFolder()
+            [/] use isValidKey() when implementing public name mkdir()
           [/] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
-        =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
-          [ ] add support for webIds
-            [ ] decide on UX:
-              - a new type of container?
-              - or list them and have a dummy readFile() behaviour, but could...
-              - show a file, e.g. happybeing.ttl where readFile() returns the
-              profile in Turtle format (could also show multiple files happybeing.jsonld etc)
-          [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
-            [ ] re-test listing of public names/services
-            example with a/c 3:
-              ls ~/SAFE/_publicNames/rsapp    # valid
-              ls ~/SAFE/_publicNames/rsappx   # not valid, but fails to error
-          [ ] examine WHM PoC code and:
-            [ ] figure out what the strange 'garbage' entry is in _publicNames
-            -> see topic: https://safenetforum.org/t/latest-whm-behaviour-for-use-with-webid-poc/25315/4?u=happybeing
-            [/] add code to handle, or ignore WebID entries
-          [ ] implement caching in safe-containers.js
-            [ ] gather some performance/profiling info (even very crude is good)
-            [ ] review info from Maidsafe on API GET use
-                see https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
-            First thoughts:
-              - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
-              - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
-              - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
-              - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
-              - implement with a caching on/off flag
-          [ ] re-use of safe-container.js container by searching map by xor address:
-            [ ] implement with on/off flag
-            [ ] compare performance
-      [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
-      [ ] implement simplified file interface for example:
-        [ ] first consider using file descriptors so that open/read/write/close
-            can operate with less redundant calls (e.g. repeated fetch/open in
-            each readFileBuf() call). But discuss gains with Maidsafe first if
-            no obvious efficiencies in my code.
-        [ ] saveFile(path, [create])
-        [ ] fileExists(path)
-        [ ] deleteFile(path)
-        [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
-        [ ] support empty folders by creating a placeholder file:
-        [/] propose that empty folders be implemented in NFS by inserting a file called ".nfsfolder" which
-        always points to an immutable data which contains the text
-        -> https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895
-    [/] put FUSE ops on the above for now, but later:
-      [/] if poss. move the FUSE ops back into the safenetwork-fuse
-          handlers (RootHander, PublicNamesHandler, ServicesHandler, NfsHandler etc)
-    [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
-      [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
-    [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
-[ ] consider support for empty directories (see: https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895)
-  [ ] one idea: 'ghost' folders held in memory by SafeContainer (wiped on
+      [/] create SAFE FUSE Linux build for testers
+      [/] announce SAFE FUSE available to test
+        See: https://forum.safedev.org/t/safe-fuse-help-with-testing/2019/4?u=happybeing
+      [/] update the README.md with instructions for:
+        [/] users
+        [/] development
+        [/] development debugging
+        [/] build for Linux
+        [/] packaged Linux debugging
+      [/] fix bugs and repeat
+      [/] then create Linux release:
+        [/] build executable (Linux)
+        [/] test executable (Linux)
+        [/] SafenetworkJs v0.1.0
+          [/] tag
+          [/] merge to master
+          [/] announce
+        [/] SAFE FUSE v0.1.0
+          [/] tag
+          [/] merge to master
+          [/] announce
+[ ] Next Release v0.2.0
+== safe-containers.js ==
+=>[ ] BUG ls of a public name with one additional character does not generate an error to the user
+  [ ] implement simplified file interface for example:
+    [ ] first consider using file descriptors so that open/read/write/close
+        can operate with less redundant calls (e.g. repeated fetch/open in
+        each readFileBuf() call). But discuss gains with Maidsafe first if
+        no obvious efficiencies in my code.
+    [ ] saveFile(path, [create])
+    [ ] fileExists(path)
+    [ ] deleteFile(path)
+
+CONSIDER FOR  V0.2.0
+  [ ] update for safe_node_app v0.9.1
+    [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
+  [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
+
+  == safe-containers.js ==
+  [ ] implement empty folders (createFolder(path) / deleteFolder(path))
+      - by creating a placeholder file (see: https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895)
+      - PREFERRED: 'ghost' folders held in memory by SafeContainer (wiped on
       destruction or saved only on the client). Might double as a local FS cache?
+  [ ] implement caching in safe-containers.js
+    [ ] gather some performance/profiling info (even very crude is good)
+    [ ] review info from Maidsafe on API GET use
+        see https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
+    First thoughts:
+      - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
+      - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
+      - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
+      - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
+      - implement with a caching on/off flag
+    [ ] re-use of safe-container.js container by searching map by xor address:
+      [ ] implement with on/off flag
+      [ ] compare performance
+  [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
+  [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
+    [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
+  [ ] add support for webIds
+    [ ] decide on UX:
+      - a new type of container?
+      - or list them and have a dummy readFile() behaviour, but could...
+      - show a file, e.g. happybeing.ttl where readFile() returns the
+      profile in Turtle format (could also show multiple files happybeing.jsonld etc)
+  [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
+    [ ] re-test listing of public names/services
+    example with a/c 3:
+      ls ~/SAFE/_publicNames/rsapp    # valid
+      ls ~/SAFE/_publicNames/rsappx   # not valid, but fails to error
+  [ ] examine WHM PoC code and:
+    [ ] figure out what the strange 'garbage' entry is in _publicNames
+    -> see topic: https://safenetforum.org/t/latest-whm-behaviour-for-use-with-webid-poc/25315/4?u=happybeing
+    [/] add code to handle, or ignore WebID entries
+
+LATER
+[ ] issue #1: implement JSDocs or similar across the code
+[ ] migrate any remaining features from safenetwork-webapi to new code structure
+  - safenetwork-api.js App auth, access to features (SAFE API, NFS, services etc.)
+  - safe-containers.js wrappers for default containers with simplified JSON
+    file system like interface
+  - safe-services.js specialist SAFE and generic RESTful services for web app *and* desktop (both via fetch()
 [ ] resume support for LDP, remotestorage etc
   [ ] revive Sevices support
   [ ] add RESTful interface to SafeContainer alongside the FS interface
