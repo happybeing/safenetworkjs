@@ -1,5 +1,5 @@
 /* TODO theWebalyst:
-[ ] implement JSDocs or similar across the code
+[ ] issue #1: implement JSDocs or similar across the code
 [/] npm link for development of safenetwork-fuse
 [x] get simple auth working so safenetwork-fuse auths with mock
   -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setApp()
@@ -88,35 +88,37 @@
         [/] announce SAFE FUSE available to test
           See: https://forum.safedev.org/t/safe-fuse-help-with-testing/2019/4?u=happybeing
         [ ] update the README.md with instructions for:
-          [ ] users
-          [ ] development
-          [ ] development debugging
-          [ ] build for Linux
-          [ ] packaged Linux debugging
+          [/] users
+          [/] development
+          [/] development debugging
+          [/] build for Linux
+          [/] packaged Linux debugging
           [ ] build for Windows (benno?)
           [ ] packaged Windows debugging (benno?)
           [ ] build for Mac OS (tmark?)
           [ ] packaged Mac OS debugging (tmark?)
         [ ] fix bugs and repeat
         [ ] then create Linux release:
-          [ ] build executable (Linux)
-          [ ] test executable (Linux)
-          [ ] SafenetworkJs
-            [ ] tag
-            [ ] merge to master
-            [ ] announce
-          [ ] SAFE FUSE
-            [ ] tag
-            [ ] merge to master
-            [ ] announce
+          [/] build executable (Linux)
+          [/] test executable (Linux)
+          [/] SafenetworkJs v0.1.0
+            [/] tag
+            [/] merge to master
+            [/] announce
+          [/] SAFE FUSE v0.1.0
+            [/] tag
+            [/] merge to master
+            [/] announce
       [ ] further work
         [ ] safe-containers.js
-        =>[ ] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
+          [/] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
         =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
-          [ ] add support for webIds? as a new type of container I think
-            [ ] for now just list them and have a dummy readFile() behaviour, but could...
-            [ ] show a file, e.g. happybeing.ttl
-            [ ] readFile() returns the profile in Turtle format (could also show multiple files happybeing.jsonld etc)
+          [ ] add support for webIds
+            [ ] decide on UX:
+              - a new type of container?
+              - or list them and have a dummy readFile() behaviour, but could...
+              - show a file, e.g. happybeing.ttl where readFile() returns the
+              profile in Turtle format (could also show multiple files happybeing.jsonld etc)
           [ ] WHEN AVAILABLE AGAIN: add email service on a/c 3
             [ ] re-test listing of public names/services
             example with a/c 3:
@@ -186,6 +188,10 @@
 * Use this in combination with related safenetwork modules, proposed:
 * - FS API - filesystem features (safenetwork-fs.js)
 * - Web API - RESTful Standard Web (safenetwork-web.js + safenetwork-webservices.js)
+
+TODO: these notes were written early in the design so need review and update:
+      - some ideas may have changed
+      - some things may not yet be implemented
 
 safenetworkjs and safenetwork-web
 =================================
