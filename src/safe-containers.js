@@ -13,6 +13,7 @@ require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 const debug = require('debug')('safenetworkjs:container')  // Web API
 const path = require('path')
 const u = require('./safenetwork-utils')
+const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
 
 // TODO remove this
 const fakeReadDir = {
@@ -177,6 +178,8 @@ class SafeContainer {
         this._mData = await this._initialiseFromXorName(this._name, this._tagType)
       }
 
+      if (this._mData) await this.initialiseNfs()
+
       // Add to FS cache if it has a containerPath
       if (this._containerPath !== '') containerMap.put(this._containerPath, this)
     } catch (error) {
@@ -223,10 +226,7 @@ class SafeContainer {
   encryptKeys () { return this._encryptKeys === true }
   encryptValues () { return this._encryptValues === true }
 
-  nfs () {
-    if (!this._nfs) this._nfs = this._mData.emulateAs('NFS')
-    return this._nfs
-  }
+  async initialiseNfs () {} // Override in classes which support NFS
 
   async updateMetadata () {
     try {
@@ -711,6 +711,9 @@ class SafeContainer {
         }))
       })
       await Promise.all(entryQ).catch((e) => debug(e.message))
+      if (!result) {
+        debug('WARNING: %s.callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
+      }
       debug('%s.call returning result: %o', constructor.name, result)
       return result
     } catch (e) {
@@ -781,7 +784,7 @@ class SafeContainer {
       debug('file not found')
       debug(error.message)
     }
-    debug('itemType(%s) returning: ', type)
+    debug('itemType(%s) returning: ', itemPath, type)
     return type
   }
 
@@ -1289,6 +1292,17 @@ class NfsContainer extends SafeContainer {
     }
   }
 
+  async initialiseNfs () {
+    if (!this._nfs) {
+      this._nfs = await this._mData.emulateAs('NFS')
+      this._files = new NfsContainerFiles(this._nfs)
+    }
+    return this._nfs
+  }
+
+  nfs () { return this._nfs }
+  files () { return this._files }
+
   /**
    * create an NFS MutableData and insert into a parent container if present
    * @param  {String} ownerName (optional) if provided, usually the public name on which this folder is used
@@ -1398,13 +1412,13 @@ class NfsContainer extends SafeContainer {
       let type = await this.itemType(itemPath)
       if (type === containerTypes.file) {
         // File
-        let file = await this.getEntryAsFile(itemPath)
+        let fileState = await this._files.getOrFetchFileState(itemPath)
         return {
-          modified: file.modified,
+          modified: fileState._file.modified,
           accessed: now,
-          created: file.created,
-          size: await file.size(),
-          version: file.version,
+          created: fileState._file.created,
+          size: await fileState._file.size(),
+          version: fileState._file.version,
           'isFile': true,
           entryType: containerTypes.file
         }
@@ -1430,6 +1444,37 @@ class NfsContainer extends SafeContainer {
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
+      return this._files.openFile(itemPath, nfsFlags)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  // Read up to len bytes starting from pos
+  // return as a String
+  async readFile (itemPath, fd, pos, len) {
+    debug('%s.readFile(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
+    try {
+      return this._files.readFile(itemPath, fd, pos, len)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  // Write up to len bytes into buf (Uint8Array), starting at pos
+  // return number of bytes written
+  async readFileBuf (itemPath, fd, buf, pos, len) {
+    debug('%s.readFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+    try {
+      return this._files.readFileBuf(itemPath, fd, buf, pos, len)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async OLD_openFile (itemPath, nfsFlags) {
+    debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
+    try {
       let file = await this.nfs().fetch(itemPath)
       file = await this.nfs().open(file, nfsFlags)
       debug('file opened, size: ', await file.size())
@@ -1443,7 +1488,7 @@ class NfsContainer extends SafeContainer {
 
   // Read up to len bytes starting from pos
   // return as a String
-  async readFile (itemPath, fd, pos, len) {
+  async OLD_readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
       // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
@@ -1461,7 +1506,7 @@ class NfsContainer extends SafeContainer {
 
   // Write up to len bytes into buf (Uint8Array), starting at pos
   // return number of bytes written
-  async readFileBuf (itemPath, fd, buf, pos, len) {
+  async OLD_readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
       // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
