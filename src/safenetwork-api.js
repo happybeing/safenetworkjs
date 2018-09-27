@@ -108,14 +108,25 @@
 == safe-containers.js ==
 =>[ ] BUG ls of a public name with one additional character does not generate an error to the user
   [ ] implement simplified file interface for example:
-    [ ] first consider using file descriptors so that open/read/write/close
+    [/] first consider using file descriptors so that open/read/write/close
         can operate with less redundant calls (e.g. repeated fetch/open in
         each readFileBuf() call). But discuss gains with Maidsafe first if
         no obvious efficiencies in my code.
+        See Maidsafe response: https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
     [ ] saveFile(path, [create])
     [ ] fileExists(path)
     [ ] deleteFile(path)
-
+OTHER TO THINK ABOUT
+  [/] multiple desktop applications writing to the same file via safenetwork-fuse
+    - can I fail open() for read, when open, and block open for write() if open at all?
+    -> Thought for now is that this is handled elsewhere, both in the FUSE libs
+    which for fuse-bindings are not multi-threaded (hence each op call is blocking)
+    and for the SAFE client libs which must handle multi-threading and ensure
+    versioned updates in the NFS API
+  [/] writes to the Mutable Data by another SAFE application
+    - can I detect a change to an NFS MD and fail-safe, while refreshing container and file state?
+    File entry update requires version, so I can just fail the FUSE operation
+    if that has changed.
 CONSIDER FOR  V0.2.0
   [ ] update for safe_node_app v0.9.1
     [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
