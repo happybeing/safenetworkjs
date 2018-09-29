@@ -3,7 +3,9 @@
   "version": "0.0.1",
   "description": "SAFE Network API for NodeJS (for browser see safenetwork-webapi)",
   "main": "src/index.js",
-  "scripts": {},
+  "scripts": {
+    "doc": "jsdoc src -r -d docs || true"
+  },
   "author": "theWebalyst",
   "license": "GPL-3.0",
   "repository": {
@@ -26,5 +28,8 @@
     "decentralised",
     "p2p",
     "api"
-  ]
+  ],
+  "devDependencies": {
+    "jsdoc": "^3.5.5"
+  }
 }
