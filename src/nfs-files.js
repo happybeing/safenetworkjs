@@ -277,10 +277,10 @@ class NfsContainerFiles {
    * @param  {FileState} fileState
    */
   _purgeFileState (fileState) {
-      fileState.releaseDescriptor()
-      if (fileState._itemPath.length() > 0) {
-        this._containerFilesMap[fileState._itemPath] = undefined
-      }
+    fileState.releaseDescriptor()
+    if (fileState._itemPath.length() > 0) {
+      this._containerFilesMap[fileState._itemPath] = undefined
+    }
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -326,6 +326,35 @@ class NfsContainerFiles {
       debug(e.message)
       throw e
     }
+  }
+
+  /**
+   * Get user metadata for a file (file does not need to be open)
+   * @param  {String} itemPath
+   * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
+   * @return {Promise}         A buffer containing any metadata as previously set
+   */
+  async getFileMetadata (itemPath, fd) {
+    let fileState
+    try {
+      fileState = await this.getOrFetchFileState(itemPath, fd)
+      if (fileState && fileState._file) return fileState._file.userMetadata
+    } catch (e) { debug(e) }
+  }
+
+  /**
+   * Set metadata to be written when on closeFile() (for a file opened for write)
+   *
+   * Note: must only be called after succesful createFile() or openFile() for write
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor
+   * @param  {Buffer}  metadata Metadata that will be written on closeFile()
+   */
+  setFileMetadata (itemPath, fd, metadata) {
+    try {
+      let fileState = this.getCachedFileState(itemPath, fd)
+      if (fileState) fileState._newMetadata = metadata
+    } catch (e) { debug(e) }
   }
 
   /**
@@ -416,36 +445,6 @@ class NfsContainerFiles {
       debug(e.message)
       throw e
     }
-  }
-
-  /**
-   * Get user metadata for a file (file does not need to be open)
-   * @param  {String} itemPath
-   * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
-   * @return {Promise}         A buffer containing any metadata as previously set
-   */
-  async getFileMetadata(itemPath, fd) {
-
-    let fileState
-    try {
-      fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (fileState && fileState._file) return fileState._file.userMetadata
-    } catch (e) { debug(e) }
-  }
-
-  /**
-   * Set metadata to be written when on closeFile() (for a file opened for write)
-   *
-   * Note: must only be called after succesful createFile() or openFile() for write
-   * @param  {String}  itemPath
-   * @param  {Number}  fd       [optional] file descriptor
-   * @param  {Buffer}  metadata Metadata that will be written on closeFile()
-   */
-  setFileMetadata(itemPath, fd, metadata) {
-    try {
-      let fileState = this.getCachedFileState(itemPath, fd)
-      if (fileState) fileState._newMetadata = metadata
-    } catch (e) { debug(e) }
   }
 
   /**
