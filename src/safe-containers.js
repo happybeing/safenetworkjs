@@ -1450,8 +1450,23 @@ class NfsContainer extends SafeContainer {
     }
   }
 
-  // Read up to len bytes starting from pos
-  // return as a String
+  /**
+   * Read up to len bytes starting from pos
+   *
+   * readFile() can be used in one of two ways:
+   * - simple: just call readFile() and it will read data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
+   *
+   * Note: if this function fails, the file state is flushed and any file descriptor
+   *       will be invalidated
+   *
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
+   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          String container bytes read
+   */
   async readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
@@ -1461,8 +1476,24 @@ class NfsContainer extends SafeContainer {
     }
   }
 
-  // Write up to len bytes into buf (Uint8Array), starting at pos
-  // return number of bytes written
+  /**
+   * Read up to len bytes into buf (Uint8Array), starting at pos
+   *
+   * readFileBuf() can be used in one of two ways:
+   * - simple: just call readFile() and it will read data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
+   *
+   * Note: if this function fails, the file state is flushed and any file descriptor
+   *       will be invalidated
+   *
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {Uint8Array}  buf  buffer to fill with data
+   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
+   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          Number of bytes read into buf
+   */
   async readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
     try {
@@ -1472,53 +1503,65 @@ class NfsContainer extends SafeContainer {
     }
   }
 
-  async OLD_openFile (itemPath, nfsFlags) {
-    debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
-    try {
-      let file = await this.nfs().fetch(itemPath)
-      file = await this.nfs().open(file, nfsFlags)
-      debug('file opened, size: ', await file.size())
-      return file
-    } catch (e) { debug(e.message) }
+  /**
+   * Write up to len bytes of data to a file, starting at pos
+   *
+   * This function can be used in one of two ways:
+   * - stand-alone: without first opening it will open/write/close the
+   *   file, and a new file will be committed to the network. You must
+   *   specify pos of zero in this mode, and up to len bytes from data
+   *   will be the new content of the file
+   * - open-first: it will leave the file open, allowing multiple writes
+   *   to different parts of the file, but data will not be committed to
+   *   the network until you close the file.
+   *
+   * Note: if this function fails, the file state is flushed and any file descriptor
+   *       will be invalidated
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {String}  data     the data to be written
+   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
+   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          Number of bytes written to the file
+   */
+  async writeFile (itemPath, fd, data, pos, len) {
+    debug('%s.readFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, data, pos, len)
+    throw new Error('TODO implement writeFile()!')
   }
 
-  // TODO Review possible use of fd (file descriptor). Could use to hold a set
-  //      of fetched and/or open File objects rather than having to do do
-  //      fetch() and open() again before every read or write
+  /**
+   * Write up to len bytes from buf to a file, starting at pos
+   *
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {Uint8Array}  buf  the data to be written
+   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
+   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          Number of bytes read into buf
+   */
+  async writeFileBuf (itemPath, fd, buf, len, pos) {
+    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
 
-  // Read up to len bytes starting from pos
-  // return as a String
-  async OLD_readFile (itemPath, fd, pos, len) {
-    debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
+    let fileState
     try {
-      // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
-      let file = await this.getEntryAsFile(itemPath)
-      file = await this.nfs().open(file, this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
-      let size = await file.size()
-      if (pos + len > size) len = size - pos
-      let content = await file.read(pos, len)
-      debug('%s bytes read from file.', content.byteLength)
+      fileState = await this.getOrFetchFileState(itemPath, fd)
+      if (!fileState.isOpenForWrite() && await fileState.open(this.nfs(), this._safeApi.CONSTANTS.NFS_FILE_MODE_WRITE)) {
+        debug('file (%s) opened for write', fileState.fileDescriptor())
+      } else {
+        throw new Error('failed to open file')
+      }
 
-      let decoder = new TextDecoder()
-      return decoder.decode(content)
-    } catch (e) { debug(e.message) }
-  }
-
-  // Write up to len bytes into buf (Uint8Array), starting at pos
-  // return number of bytes written
-  async OLD_readFileBuf (itemPath, fd, buf, pos, len) {
-    debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
-    try {
-      // TODO see if I can get file from the caller as in FUSE fd (file descriptor)
-      let file = await this.getEntryAsFile(itemPath)
-      file = await this.nfs().open(file, this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
-      let size = await file.size()
+      let size = await fileState._file.size()
       if (pos + len > size) len = size - pos
-      let readBuf = await file.read(pos, len)
+      let readBuf = await fileState._file.read(pos, len)
       debug('%s bytes read from file.', readBuf.byteLength)
       buf.set(readBuf)
       return readBuf.byteLength
-    } catch (e) { debug(e.message) }
+    } catch (e) {
+      if (fileState) fileState.releaseDescriptor() // read() failed
+      debug(e.message)
+      throw e
+    }
   }
 
   /**
