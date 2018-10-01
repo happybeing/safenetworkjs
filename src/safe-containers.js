@@ -1450,6 +1450,45 @@ class NfsContainer extends SafeContainer {
     }
   }
 
+  async createFile (itemPath) {
+    debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
+    try {
+      return this._files.createFile(itemPath)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  /**
+   * Get user metadata for a file (file does not need to be open)
+   * @param  {String} itemPath
+   * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
+   * @return {Promise}         A buffer containing any metadata as previously set
+   */
+  async getFileMetadata (itemPath, fd) {
+    try {
+      return this._files.getFileMetadata(itemPath, fd)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  /**
+   * Set metadata to be written when on closeFile() (for a file opened for write)
+   *
+   * Note: must only be called after succesful createFile() or openFile() for write
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor
+   * @param  {Buffer}  metadata Metadata that will be written on closeFile()
+   */
+  setFileMetadata (itemPath, fd, metadata) {
+    try {
+      return this._files.setFileMetadata(itemPath, fd, metadata)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
   /**
    * Read up to len bytes starting from pos
    *
@@ -1504,63 +1543,54 @@ class NfsContainer extends SafeContainer {
   }
 
   /**
-   * Write up to len bytes of data to a file, starting at pos
+   * Write up to len bytes starting from pos
    *
    * This function can be used in one of two ways:
-   * - stand-alone: without first opening it will open/write/close the
-   *   file, and a new file will be committed to the network. You must
-   *   specify pos of zero in this mode, and up to len bytes from data
-   *   will be the new content of the file
-   * - open-first: it will leave the file open, allowing multiple writes
-   *   to different parts of the file, but data will not be committed to
-   *   the network until you close the file.
+   * - simple: just call writeFile() and it will write data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
    *
-   * Note: if this function fails, the file state is flushed and any file descriptor
-   *       will be invalidated
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
+   *
    * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
-   * @param  {String}  data     the data to be written
-   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
-   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          Number of bytes written to the file
+   * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          String container bytes read
    */
-  async writeFile (itemPath, fd, data, pos, len) {
-    debug('%s.readFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, data, pos, len)
-    throw new Error('TODO implement writeFile()!')
+  async writeFile (itemPath, fd, content) {
+    debug('%s.writeFile(\'%s\', %s, ...)', this.constructor.name, itemPath, fd)
+    try {
+      return this._files.writeFile(itemPath, fd, content)
+    } catch (e) {
+      debug(e.message)
+    }
   }
 
   /**
-   * Write up to len bytes from buf to a file, starting at pos
+   * Write to file, len bytes from buf (Uint8Array)
+   *
+   * This function can be used in one of two ways:
+   * - simple: just call writeFileBuf() and it will write data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
+   *
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
    *
    * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
-   * @param  {Uint8Array}  buf  the data to be written
-   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
-   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          Number of bytes read into buf
+   * @param  {Uint8Array}  buf      [description]
+   * @param  {Number}  len
+   * @return {Promise}          Number of bytes written to file
    */
-  async writeFileBuf (itemPath, fd, buf, len, pos) {
-    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+  async writeFileBuf (itemPath, fd, buf, len) {
+    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, len)
 
-    let fileState
     try {
-      fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (!fileState.isOpenForWrite() && await fileState.open(this.nfs(), this._safeApi.CONSTANTS.NFS_FILE_MODE_WRITE)) {
-        debug('file (%s) opened for write', fileState.fileDescriptor())
-      } else {
-        throw new Error('failed to open file')
-      }
-
-      let size = await fileState._file.size()
-      if (pos + len > size) len = size - pos
-      let readBuf = await fileState._file.read(pos, len)
-      debug('%s bytes read from file.', readBuf.byteLength)
-      buf.set(readBuf)
-      return readBuf.byteLength
+      return this._files.writeFileBuf(itemPath, fd, buf, len)
     } catch (e) {
-      if (fileState) fileState.releaseDescriptor() // read() failed
       debug(e.message)
-      throw e
     }
   }
 
