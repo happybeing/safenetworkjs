@@ -164,7 +164,7 @@ class NfsFileState {
 
   isOpen () { return this._fileDescriptor !== undefined }
   isNew () { return this._isNewFile }
-  version() { return this._file ? this._file._version : undefined }
+  version () { return this._file ? this._file._version : undefined }
 
   isWriteable () {
     return this._flags === safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
@@ -213,7 +213,7 @@ class NfsContainerFiles {
     this._containerFilesMap = []  // Map nfs+path to NfsFileState objects
   }
 
-  getCachedFileState(itemPath, fd) {
+  getCachedFileState (itemPath, fd) {
     let fileState
     if (fd !== undefined) fileState = allNfsFiles.getFileState(fd)
     if (!fileState) fileState = this.getFileStateFromPath(itemPath)
@@ -239,6 +239,7 @@ class NfsContainerFiles {
     let nfsFileState
     try {
       nfsFileState = this.getCachedFileState(itemPath, fd)
+      if (nfsFileState) return nfsFileState
       return this._fetchFile(itemPath)  // NFS fetch() and create FileState object
     } catch (e) { debug(e) }
   }
