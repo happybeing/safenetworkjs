@@ -240,7 +240,7 @@ class NfsContainerFiles {
     try {
       nfsFileState = this.getCachedFileState(itemPath, fd)
       if (nfsFileState) return nfsFileState
-      return this._fetchFile(itemPath)  // NFS fetch() and create FileState object
+      return this._fetchFileState(itemPath)  // NFS fetch() and create FileState object
     } catch (e) { debug(e) }
   }
 
@@ -316,8 +316,8 @@ class NfsContainerFiles {
       }
 
       if (!fileState) fileState = await this._newFileState(itemPath)
-      if (fileState && await fileState.create(itemPath)) {
-        debug('file (%s) createed, size: ', fileState.fileDescriptor(), await fileState._file.size())
+      if (fileState && await fileState.create(this.nfs())) {
+        debug('file (%s) created: ', fileState.fileDescriptor())
         return fileState.fileDescriptor()
       } else {
         throw new Error('createFile() failed')
