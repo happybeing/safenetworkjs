@@ -13,6 +13,7 @@ require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 const debug = require('debug')('safenetworkjs:container')  // Web API
 const path = require('path')
 const u = require('./safenetwork-utils')
+const SafeJs = require('./safenetwork-api')
 const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
 
 // TODO remove this
@@ -30,14 +31,15 @@ const defaultContainerNames = [
   '_publicNames'
 ]
 
-const containerTypes = {
+const containerTypeCodes = {
   defaultContainer: 'default-container',  // SAFE default container (e.g. _public, _publicNames etc)
   nfsContainer: 'nfs-container',    // an NFS container, or if in a default container an entry that ends with slash
   file: 'file',                     // an entry that doesn't end with slash
   fakeContainer: 'fake-container',  // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
   servicesContainer: 'services-container',  // Services container for a public name
   service: 'service',               // Services container for a public name
-  notValid: 'not-found'
+  notFound: 'not-found',
+  notValid: 'not-valid'
 }
 
 /**
@@ -241,15 +243,20 @@ class SafeContainer {
   async getValueVersion (key) {
     try {
       return this._safeJs.getMutableDataValueVersion(this._mData, key)
-    } catch (e) { debug(e.message) }
+    } catch (e) {
+      debug(e.message)
+      throw e
+    }
   }
 
   async getEntryValue (key) {
     try {
       let valueVersion = await this._safeJs.getMutableDataValueVersion(this._mData, key)
-      if (!valueVersion) throw new Error()
-      return valueVersion.buf
-    } catch (e) { debug('%s.getEntryValue(%s) failed', this.constructor.name, key) }
+      return (valueVersion ? valueVersion.buf : undefined)
+    } catch (e) {
+      debug('%s.getEntryValue(%s) failed', this.constructor.name, key)
+      throw e
+    }
   }
 
   /**
@@ -713,6 +720,7 @@ class SafeContainer {
       await Promise.all(entryQ).catch((e) => debug(e.message))
       if (!result) {
         debug('WARNING: %s.callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
+        result = containerTypeCodes.notFound
       }
       debug('%s.call returning result: %o', constructor.name, result)
       return result
@@ -727,7 +735,7 @@ class SafeContainer {
     try {
       if (this.isSelf(itemPath)) {
         return this._safeJs.mutableDataStats(this._mData)
-      } else if (this.itemType(itemPath) === containerTypes.fakeContainer) {
+      } else if (this.itemType(itemPath) === containerTypeCodes.fakeContainer) {
         return {
           // TODO consider using listFolder to count folders, recursing, and then adding info from NFS containers
           // TODO these members are junk (inherited from IPFS code so change them!)
@@ -743,36 +751,36 @@ class SafeContainer {
   }
 
   /**
-   * Get the type of the item as one of containerTypes values
+   * Get the type of the item as one of containerTypeCodes values
    *
    * @param  {String} itemPath A partial or full key within the scope of the container
-   * @return {String}          A containerTypes value
+   * @return {String}          A containerTypeCodes value
    */
 
   _entryTypeOf (key) {
     // This caters for default folders, except _publicNames
-    return containerTypes.nfsContainer
+    return containerTypeCodes.nfsContainer
   }
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.notValid
+    let type = containerTypeCodes.notValid
     try {
       let itemKey = this._subTree + itemPath
       let value = await this.getEntryValue(itemKey)
       if (value) {  // itemPath exact match with entry key, so determine entry type for this container
         type = this._entryTypeOf(itemKey)
       } else if (this.isSelf(itemPath)) {
-        type = containerTypes.defaultContainer
+        type = containerTypeCodes.defaultContainer
       } else {
         // Check for fakeContainer or NFS container
         let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
         let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
         if (shortestEnclosingKey) {
           if (shortestEnclosingKey.length !== itemPath.length) {
-            type = containerTypes.fakeContainer
+            type = containerTypeCodes.fakeContainer
           } else {
-            type = containerTypes.nfsContainer
+            type = containerTypeCodes.nfsContainer
           }
         } else {
           // Attempt to call itemType on a child container
@@ -780,9 +788,9 @@ class SafeContainer {
         }
       }
     } catch (error) {
-      type = containerTypes.notValid
       debug('file not found')
       debug(error.message)
+      throw error
     }
     debug('itemType(%s) returning: ', itemPath, type)
     return type
@@ -833,7 +841,7 @@ class SafeContainer {
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypes.defaultContainer)
+        debug('%s is type: %s', itemPath, containerTypeCodes.defaultContainer)
         await this.updateMetadata()
         return {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
@@ -843,23 +851,23 @@ class SafeContainer {
           size: this._metadata.size,
           version: this._metadata.version,
           'isFile': false,
-          entryType: containerTypes.defaultContainer
+          entryType: containerTypeCodes.defaultContainer
         }
       }
 
       let type = await this.itemType(itemPath)
-      if (type === containerTypes.file ||
-          type === containerTypes.nfsContainer ||
-          type === containerTypes.service ||
-          type === containerTypes.servicesContainer) {
+      if (type === containerTypeCodes.file ||
+          type === containerTypeCodes.nfsContainer ||
+          type === containerTypeCodes.service ||
+          type === containerTypeCodes.servicesContainer) {
         debug('%s is type: %s', itemPath, type)
         return await this.callFunctionOnItem(itemPath, 'itemAttributes')
       }
 
-      if (type === containerTypes.fakeContainer) {
+      if (type === containerTypeCodes.fakeContainer) {
         // Fake container
-        debug('%s is type: %s', itemPath, containerTypes.fakeContainer)
-        // Default values (used as is for containerTypes.nfsContainer)
+        debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
+        // Default values (used as is for containerTypeCodes.nfsContainer)
         return {
           modified: now,
           accessed: now,
@@ -869,9 +877,12 @@ class SafeContainer {
           'isFile': false,
           entryType: type
         }
+      } else if (type === containerTypeCodes.notFound) {
+        return { entryType: type }
       }
     } catch (e) {
       debug(e.message)
+      throw e
     }
   }
 
@@ -880,9 +891,43 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'openFile', nfsFlags)
-    } catch (e) {
-      debug(e.message)
-    }
+    } catch (e) { debug(e.message) }
+  }
+
+  async createFile (itemPath) {
+    debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'createFile', itemPath)
+    } catch (e) { debug(e.message) }
+  }
+
+  /**
+   * Get user metadata for a file (file does not need to be open)
+   * @param  {String} itemPath
+   * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
+   * @return {Promise}         A buffer containing any metadata as previously set
+   */
+  async getFileMetadata (itemPath, fd) {
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'getFileMetadata', itemPath, fd)
+    } catch (e) { debug(e.message) }
+  }
+
+  /**
+   * Set metadata to be written when on closeFile() (for a file opened for write)
+   *
+   * Note: must only be called after succesful createFile() or openFile() for write
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor
+   * @param  {Buffer}  metadata Metadata that will be written on closeFile()
+   */
+  async setFileMetadata (itemPath, fd, metadata) {
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'setFileMetadata', itemPath, fd, metadata)
+    } catch (e) { debug(e.message) }
   }
 
   // Read up to len bytes starting from pos
@@ -892,9 +937,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
-    } catch (e) {
-      debug(e.message)
-    }
+    } catch (e) { debug(e.message) }
   }
 
   // Write up to len bytes into buf (Uint8Array), starting at pos
@@ -904,6 +947,60 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  /**
+   * Write up to len bytes starting from pos
+   *
+   * This function can be used in one of two ways:
+   * - simple: just call writeFile() and it will write data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
+   *
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
+   *
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
+   * @return {Promise}          String container bytes read
+   */
+  async writeFile (itemPath, fd, content) {
+    debug('%s.writeFile(\'%s\', %s, ...)', this.constructor.name, itemPath, fd)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'writeFile', fd, content)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  /**
+   * Write to file, len bytes from buf (Uint8Array)
+   *
+   * This function can be used in one of two ways:
+   * - simple: just call writeFileBuf() and it will write data, and if the
+   *   file is not open yet, it will do that first
+   * - you can call openFile() before, to open in a specific mode using flags
+   *
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
+   *
+   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
+   * @param  {Uint8Array}  buf      [description]
+   * @param  {Number}  len
+   * @return {Promise}          Number of bytes written to file
+   */
+  async writeFileBuf (itemPath, fd, buf, len) {
+    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, len)
+
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len)
     } catch (e) {
       debug(e.message)
     }
@@ -981,7 +1078,7 @@ class PublicNamesContainer extends SafeContainer {
   }
 
   _entryTypeOf (key) {
-    return containerTypes.servicesContainer
+    return containerTypeCodes.servicesContainer
   }
 
   // Containers should sanity check keys in case of corruption
@@ -995,7 +1092,7 @@ class PublicNamesContainer extends SafeContainer {
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.notValid
+    let type = containerTypeCodes.notValid
     try {
       let itemKey = this._subTree + itemPath
       let value = await this.getEntryValue(itemKey)
@@ -1007,7 +1104,7 @@ class PublicNamesContainer extends SafeContainer {
         type = await this.callFunctionOnItem(itemPath, 'itemType')
       }
     } catch (error) {
-      type = containerTypes.notValid
+      type = containerTypeCodes.notValid
       debug('public name not found: ', itemPath)
       debug(error.message)
     }
@@ -1109,19 +1206,19 @@ class ServicesContainer extends SafeContainer {
   }
 
   _entryTypeOf (key) {
-    return containerTypes.service
+    return containerTypeCodes.service
   }
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.notValid
+    let type = containerTypeCodes.notValid
     try {
       let itemKey = this._subTree + itemPath
       let value = await this.getEntryValue(itemKey)
       if (value) {  // itemPath exact match with entry key, so determine entry type for this container
         type = this._entryTypeOf(itemKey)
       } else if (this.isSelf(itemPath)) {
-        type = containerTypes.servicesContainer
+        type = containerTypeCodes.servicesContainer
       } else {
         // Attempt to call itemType on a child container
         type = await this.callFunctionOnItem(itemPath, 'itemType')
@@ -1142,7 +1239,7 @@ class ServicesContainer extends SafeContainer {
       //     return await this.callFunctionOnItem(itemPath, 'itemType')
       //   }
     } catch (error) {
-      type = containerTypes.notValid
+      type = containerTypeCodes.notValid
       debug('file not found')
       debug(error.message)
     }
@@ -1177,7 +1274,7 @@ class ServicesContainer extends SafeContainer {
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypes.servicesContainer)
+        debug('%s is type: %s', itemPath, containerTypeCodes.servicesContainer)
         await this.updateMetadata()
         return {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
@@ -1187,11 +1284,11 @@ class ServicesContainer extends SafeContainer {
           size: this._metadata.size,
           version: this._metadata.version,
           'isFile': false,
-          entryType: containerTypes.servicesContainer
+          entryType: containerTypeCodes.servicesContainer
         }
       }
 
-      let type = containerTypes.service
+      let type = containerTypeCodes.service
       let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
       if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
         // Service with container, so pass to child
@@ -1201,7 +1298,7 @@ class ServicesContainer extends SafeContainer {
 
       // Service without its own container (or unkown service)
       debug('%s is type: %s', itemPath, type)
-      // Default values (used as is for containerTypes.nfsContainer)
+      // Default values (used as is for containerTypeCodes.nfsContainer)
       return {
         modified: now,
         accessed: now,
@@ -1209,7 +1306,7 @@ class ServicesContainer extends SafeContainer {
         size: 0,
         version: -1,
         'isFile': true,
-        entryType: containerTypes.service
+        entryType: containerTypeCodes.service
       }
     } catch (e) {
       debug(e.message)
@@ -1342,7 +1439,7 @@ class NfsContainer extends SafeContainer {
     try {
       if (this.isSelf(itemPath)) {
         return this._safeJs.mutableDataStats(this._mData)
-      } else if (this.itemType(itemPath) === containerTypes.fakeContainer) {
+      } else if (this.itemType(itemPath) === containerTypeCodes.fakeContainer) {
         return {
           // TODO consider using listFolder to count folders, recursing, and then adding info from files
           // TODO these members are junk (inherited from IPFS code so change them!)
@@ -1358,29 +1455,31 @@ class NfsContainer extends SafeContainer {
   }
 
   _entryTypeOf (key) {
-    return containerTypes.file
+    return containerTypeCodes.file
   }
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypes.notValid
+    let type = containerTypeCodes.notValid
     try {
       let itemKey = this._subTree + itemPath
       let value = await this.getEntryValue(itemKey)
       if (value) {  // itemPath exact match with entry key, so determine entry type for this container
         type = this._entryTypeOf(itemKey)
       } else if (this.isSelf(itemPath)) {
-        type = containerTypes.defaultContainer
+        type = containerTypeCodes.defaultContainer
       } else {
         // Check for fakeContainer or NFS container
         let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
         let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
         if (shortestEnclosingKey) {
-          type = containerTypes.fakeContainer
+          type = containerTypeCodes.fakeContainer
+        } else {
+          type = containerTypeCodes.notFound
         }
       }
     } catch (error) {
-      type = containerTypes.notValid
+      type = containerTypeCodes.notValid
       debug('file not found')
       debug(error.message)
     }
@@ -1394,7 +1493,7 @@ class NfsContainer extends SafeContainer {
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypes.nfsContainer)
+        debug('%s is type: %s', itemPath, containerTypeCodes.nfsContainer)
         await this.updateMetadata()
         let result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
@@ -1404,13 +1503,13 @@ class NfsContainer extends SafeContainer {
           size: this._metadata.size,
           version: this._metadata.version,
           'isFile': false,
-          entryType: containerTypes.nfsContainer
+          entryType: containerTypeCodes.nfsContainer
         }
         return result
       }
 
       let type = await this.itemType(itemPath)
-      if (type === containerTypes.file) {
+      if (type === containerTypeCodes.file) {
         // File
         let fileState = await this._files.getOrFetchFileState(itemPath)
         return {
@@ -1420,12 +1519,12 @@ class NfsContainer extends SafeContainer {
           size: await fileState._file.size(),
           version: fileState._file.version,
           'isFile': true,
-          entryType: containerTypes.file
+          entryType: containerTypeCodes.file
         }
       } else {
         // Fake container
-        debug('%s is type: %s', itemPath, containerTypes.fakeContainer)
-        // Default values (used as is for containerTypes.nfsContainer)
+        debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
+        // Default values (used as is for containerTypeCodes.nfsContainer)
         return {
           modified: now,
           accessed: now,
@@ -1433,7 +1532,7 @@ class NfsContainer extends SafeContainer {
           size: 0,
           version: -1,
           'isFile': false,
-          entryType: containerTypes.fakeContainer
+          entryType: containerTypeCodes.fakeContainer
         }
       }
     } catch (e) {
@@ -1481,7 +1580,7 @@ class NfsContainer extends SafeContainer {
    * @param  {Number}  fd       [optional] file descriptor
    * @param  {Buffer}  metadata Metadata that will be written on closeFile()
    */
-  setFileMetadata (itemPath, fd, metadata) {
+  async setFileMetadata (itemPath, fd, metadata) {
     try {
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
@@ -1649,7 +1748,7 @@ const containerClasses = defaultContainers
 containerClasses._services = ServicesContainer
 
 module.exports.defaultContainerNames = defaultContainerNames
-module.exports.containerTypes = containerTypes
+module.exports.containerTypeCodes = containerTypeCodes
 module.exports.defaultContainers = defaultContainers
 module.exports.containerClasses = containerClasses
 module.exports.PublicContainer = PublicContainer
