@@ -116,6 +116,15 @@
     [ ] saveFile(path, [create])
     [ ] fileExists(path)
     [ ] deleteFile(path)
+  [ ] cleaner code:
+    [ ] migrate to ES6 import etc
+    [ ] is it supported by nexe?
+    [ ] check supported by pkg
+    [ ] test with pkg in safe-cli-boilerplate
+    [ ] test in safenetworkjs branch
+    [ ] test in safenetwork-fuse branch
+    [ ] done!
+  [ ] adopt: import { CONSTANTS as SAFE_CONSTANTS } from '@maidsafe/safe-node-app'
 OTHER TO THINK ABOUT
   [/] multiple desktop applications writing to the same file via safenetwork-fuse
     - can I fail open() for read, when open, and block open for write() if open at all?
