@@ -902,6 +902,16 @@ class SafeContainer {
     } catch (e) { debug(e.message) }
   }
 
+  async closeFile (itemPath, fd) {
+    debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'closeFile', itemPath)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
   /**
    * Get user metadata for a file (file does not need to be open)
    * @param  {String} itemPath
@@ -1461,21 +1471,27 @@ class NfsContainer extends SafeContainer {
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
     let type = containerTypeCodes.notValid
+
     try {
-      let itemKey = this._subTree + itemPath
-      let value = await this.getEntryValue(itemKey)
-      if (value) {  // itemPath exact match with entry key, so determine entry type for this container
-        type = this._entryTypeOf(itemKey)
-      } else if (this.isSelf(itemPath)) {
-        type = containerTypeCodes.defaultContainer
+      let fileState = await this._files.getOrFetchFileState(itemPath)
+      if (fileState) {
+        type = containerTypeCodes.file
       } else {
-        // Check for fakeContainer or NFS container
-        let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
-        let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
-        if (shortestEnclosingKey) {
-          type = containerTypeCodes.fakeContainer
+        let itemKey = this._subTree + itemPath
+        let value = await this.getEntryValue(itemKey)
+        if (value) {  // itemPath exact match with entry key, so determine entry type for this container
+          type = this._entryTypeOf(itemKey)
+        } else if (this.isSelf(itemPath)) {
+          type = containerTypeCodes.defaultContainer
         } else {
-          type = containerTypeCodes.notFound
+          // Check for fakeContainer or NFS container
+          let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
+          let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
+          if (shortestEnclosingKey) {
+            type = containerTypeCodes.fakeContainer
+          } else {
+            type = containerTypeCodes.notFound
+          }
         }
       }
     } catch (error) {
@@ -1508,15 +1524,20 @@ class NfsContainer extends SafeContainer {
         return result
       }
 
-      let type = await this.itemType(itemPath)
+      let type
+      let fileState = await this._files.getOrFetchFileState(itemPath)
+      if (fileState) {
+        type = containerTypeCodes.file
+      } else {
+        type = await this.itemType(itemPath)
+      }
       if (type === containerTypeCodes.file) {
         // File
-        let fileState = await this._files.getOrFetchFileState(itemPath)
         return {
           modified: fileState._file.modified,
           accessed: now,
           created: fileState._file.created,
-          size: await fileState._file.size(),
+          size: 0, // TODO await fileState._file.size(),
           version: fileState._file.version,
           'isFile': true,
           entryType: containerTypeCodes.file
@@ -1553,6 +1574,15 @@ class NfsContainer extends SafeContainer {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     try {
       return this._files.createFile(itemPath)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async closeFile (itemPath, fd) {
+    debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
+    try {
+      return this._files.closeFile(itemPath, fd)
     } catch (e) {
       debug(e.message)
     }

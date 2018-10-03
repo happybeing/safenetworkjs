@@ -279,7 +279,7 @@ class NfsContainerFiles {
    */
   _purgeFileState (fileState) {
     fileState.releaseDescriptor()
-    if (fileState._itemPath.length() > 0) {
+    if (fileState._itemPath.length > 0) {
       this._containerFilesMap[fileState._itemPath] = undefined
     }
   }
@@ -382,13 +382,13 @@ class NfsContainerFiles {
 
     let fileState
     try {
-      fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (!fileState.isOpen() && await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
-        debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
-      } else {
-        throw new Error('failed to open file')
+      if (!fileState.isOpen()) {
+        if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+        } else {
+          throw new Error('failed to open file')
+        }
       }
-
       let size = await fileState._file.size()
       if (pos + len > size) len = size - pos
       let content = await fileState._file.read(pos, len)
@@ -429,12 +429,13 @@ class NfsContainerFiles {
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (!fileState.isOpen() && await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
-        debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
-      } else {
-        throw new Error('failed to open file')
+      if (!fileState.isOpen()) {
+        if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+        } else {
+          throw new Error('failed to open file')
+        }
       }
-
       let size = await fileState._file.size()
       if (pos + len > size) len = size - pos
       let readBuf = await fileState._file.read(pos, len)
@@ -469,12 +470,13 @@ class NfsContainerFiles {
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (!fileState.isOpen() && await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
-        debug('file (%s) opened for overwrite, old size: ', fileState.fileDescriptor(), await fileState._file.size())
-      } else {
-        throw new Error('failed to open file for overwrite')
+      if (!fileState.isOpen()) {
+        if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+        } else {
+          throw new Error('failed to open file')
+        }
       }
-
       let bytes = content.length
       await fileState._file.write(content)
       debug('%s bytes written to file.', bytes)
@@ -504,16 +506,17 @@ class NfsContainerFiles {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, len)
+    debug('%s.writeFileBuf(\'%s\', %s, %s, \'%s\')', this.constructor.name, itemPath, fd, buf, len)
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (!fileState.isOpen() && await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
-        debug('file (%s) opened for overwrite, old size: ', fileState.fileDescriptor(), await fileState._file.size())
-      } else {
-        throw new Error('failed to open file for overwrite')
+      if (!fileState.isOpen()) {
+        if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+        } else {
+          throw new Error('failed to open file')
+        }
       }
-
       await fileState._file.write(buf.slice(0, len))
       debug('%s bytes written to file.', len)
       return len
@@ -537,10 +540,16 @@ class NfsContainerFiles {
         let isWriteable = fileState.isWriteable()
         fileState.close(this.nfs())
         if (isWriteable) {
+          let mutationHandle = await window.safeMutableData.newMutation(this.appHandle())
+
+          // TODO use/adapt this back to encrypt if the MD is private
+          // let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
+          // let useValue = await window.safeMutableData.encryptValue(mdHandle, value)
+
           if (fileState.isNew()) {
             this.nfs().insert(fileState._itemPath, fileState._file, fileState._newMetadata)
           } else {
-            this.nfs().update(fileState._itemPath, fileState._file, fileState.version(), fileState._newMetadata)
+            this.nfs().update(fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
           }
         }
       }
