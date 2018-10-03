@@ -718,7 +718,7 @@ class SafeContainer {
         }))
       })
       await Promise.all(entryQ).catch((e) => debug(e.message))
-      if (!result) {
+      if (result === undefined) {
         debug('WARNING: %s.callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
         result = containerTypeCodes.notFound
       }
@@ -953,7 +953,7 @@ class SafeContainer {
   // Write up to len bytes into buf (Uint8Array), starting at pos
   // return number of bytes written
   async readFileBuf (itemPath, fd, buf, pos, len) {
-    debug('%s.readFileBuf(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+    debug('%s.readFileBuf(\'%s\', %o, buf, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
@@ -1537,7 +1537,7 @@ class NfsContainer extends SafeContainer {
           modified: fileState._file.modified,
           accessed: now,
           created: fileState._file.created,
-          size: 0, // TODO await fileState._file.size(),
+          size: await fileState._file.size(),
           version: fileState._file.version,
           'isFile': true,
           entryType: containerTypeCodes.file

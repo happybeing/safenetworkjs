@@ -527,6 +527,7 @@ class NfsContainerFiles {
     }
   }
 
+  // TODO review error returns, maybe based on
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileState
@@ -553,6 +554,8 @@ class NfsContainerFiles {
           }
         }
       }
+
+      return 0  // Success
     } catch (e) {
       // close/insert/update failed so invalidate cached state
       if (fileState) this._purgeFilesState(fileState)
