@@ -342,8 +342,10 @@ const getBaseUri = safeUtils.getBaseUri
 /* eslint-enable */
 
 // TODO if SAFE API starts providing error codes, replace this to use them
+// TODO ref: https://github.com/maidsafe/safe-web-hosting-manager-electron/blob/master/app/constants.js#L46
 const SafeApiErrors = []
 SafeApiErrors.ENTRY_NOT_FOUND = -106
+SafeApiErrors.ACCESS_DENIED = -100
 
 /**
  * SafenetworkJs error codes (assigned to Error.code)
@@ -371,6 +373,8 @@ const untrustedAppConfig = {
   name: 'Do NOT authorise this app',
   vendor: 'Untrusted'
 }
+
+const fullPermissions = ['Read', 'Insert', 'Update', 'Delete']
 
 // Default permissions to request. Optional parameter to SafenetworkApi.simpleAuthorise()
 //
@@ -648,6 +652,98 @@ class SafenetworkApi {
   //     throw (err)
   //   }
   // }
+
+  /* --------------------------
+   * Mutable Data Helpers
+   * --------------------------
+   */
+ //
+ //
+
+/**
+  * Insert, update, or delete (clear) an entry in a Mutable Data
+  *
+  * @param  {MutableData}  mData     [description]
+  * @param  {String}  operation 'insert', 'update' or 'delete'
+  * @param  {String}  key
+  * @param  {String}  value
+  * @return {Promise}
+  */
+  async mdRawMutate (mData, operation, key, value) {
+    throw new Error('TODO: implement %s.mdRawMutate()', this.constructor.name)
+  }
+
+ /**
+  * Insert, update, delete a Mutable Data. May auto request permissions (arp)
+  * @param  {MutableData}  mData     [description]
+  * @param  {String}  operation 'insert', 'update' or 'delete'
+  * @param  {String}  key
+  * @param  {String}  value
+  * @param  {Array}   permissions List of required permssions
+  * @return {Promise}
+  */
+  async mdArpMutate (mData, operation, key, value, permissions) {
+  }
+
+ /**
+  * Insert, update, or delete (clear) an entry in an NFS MD
+  *
+  * @param  {MutableData}  mData     [description]
+  * @param  {String}  operation 'insert', 'update' or 'delete'
+  * @param  {String}  key
+  * @param  {String}  value
+  * @return {Promise}
+  */
+  async nfsRawMutate (nfs, operation, key, value) {
+    // NOT NEEDED?
+  }
+
+ /**
+  * Insert, update, delete on NFS MD. May auto request permissions (arp)
+  * @param  {MutableData}  mData
+  * @param  {Emulation}  nfs
+  * @param  {Array}   permissions List of required permssions
+  * @param  {String}  operation 'insert', 'update' or 'delete'
+  * @param  {String}  fileName
+  * @param  {File}    file
+  * @param  {File}    version     new version of entry (for 'update' only)
+  * @param  {String}  newMetadata [optional] metadata to be set
+  * @return {Promise}             undefined, or a new session object with additional permissions
+  */
+  async nfsArpMutate (mData, nfs, permissions, operation, fileName, file, version, newMetadata) {
+    let newSession
+    try {
+      if (operation === 'insert') {
+        await this.nfs().insert(fileName, file, newMetadata)
+      } else {
+        await this.nfs().update(fileName, file, version, newMetadata)
+      }
+    } catch (e) {
+      if (e.code === SafeApiErrors.ACCESS_DENIED) {
+        try {
+          const nat = await mData.getNameAndTag()
+          const mdPermissions = [{
+            type_tag: nat.type_tag, // TODO change to typeTag for v0.9.1
+            name: nat.name,
+            perms: permissions
+          }]
+          const uri = await this.auth.genShareMDataUri(mdPermissions)
+          newSession = await this.safeApi.fromUri(this.safeApp, uri)
+          if (operation === 'insert') {
+            await this.nfs().insert(fileName, file, newMetadata)
+          } else {
+            await this.nfs().update(fileName, file, version, newMetadata)
+          }
+        } catch (e) {
+          throw e
+        }
+      } else {
+        debug('%s.nfsArpMutate() - %s() failed on NFS object', this.constructor.name, operation)
+        debug(e)
+      }
+    }
+    return newSession
+  }
 
   /* --------------------------
    * Simplified SAFE Containers
@@ -2845,6 +2941,8 @@ module.exports.NfsContainer = containers.NfsContainer
 // Constants
 module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
 module.exports.containerTypeCodes = containers.containerTypeCodes
+
+module.exports.fullPermissions = fullPermissions
 
 module.exports.ERRORS = SafenetworkJsErrors
 module.exports.SAFE_ERRORS = SafeApiErrors

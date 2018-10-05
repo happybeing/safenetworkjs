@@ -1402,7 +1402,7 @@ class NfsContainer extends SafeContainer {
   async initialiseNfs () {
     if (!this._nfs) {
       this._nfs = await this._mData.emulateAs('NFS')
-      this._files = new NfsContainerFiles(this._nfs)
+      this._files = new NfsContainerFiles(this._safeJs, this._mData, this._nfs)
     }
     return this._nfs
   }
@@ -1504,8 +1504,15 @@ class NfsContainer extends SafeContainer {
     return type
   }
 
-  async itemAttributes (itemPath) {
-    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
+  /**
+   * Get attributes of a file or directory
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor (if file is open)
+   * @return {Promise}          attributes object
+   */
+  async itemAttributes (itemPath, fd) {
+    debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
+
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
@@ -1525,7 +1532,13 @@ class NfsContainer extends SafeContainer {
       }
 
       let type
-      let fileState = await this._files.getOrFetchFileState(itemPath)
+      let fileState
+      if (fd) {
+        fileState = await this._files.getCachedFileState(itemPath)
+      } else {
+        fileState = await this._files.getOrFetchFileState(itemPath)
+      }
+
       if (fileState) {
         type = containerTypeCodes.file
       } else {
@@ -1537,7 +1550,7 @@ class NfsContainer extends SafeContainer {
           modified: fileState._file.modified,
           accessed: now,
           created: fileState._file.created,
-          size: await fileState._file.size(),
+          size: fileState.isOpen() ? 0 : await fileState._file.size(),
           version: fileState._file.version,
           'isFile': true,
           entryType: containerTypeCodes.file

@@ -57,6 +57,8 @@ const debug = require('debug')('safenetworkjs:file')  // Web API
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 const safeApi = require('@maidsafe/safe-node-app')
 
+const SafeJs = require('./safenetwork-api')
+
 const minFileDescriptor = 1
 
 class _AllNfsFiles {
@@ -208,7 +210,9 @@ class NfsFileState {
 }
 
 class NfsContainerFiles {
-  constructor (nfs) {
+  constructor (safeJs, mData, nfs) {
+    this._safeJs = safeJs
+    this._mData = mData
     this._nfs = nfs
     this._containerFilesMap = []  // Map nfs+path to NfsFileState objects
   }
@@ -292,8 +296,8 @@ class NfsContainerFiles {
       if (fileState && fileState.isOpen()) this.closeFile(itemPath)  // If already open make sure it is closed
 
       if (!fileState) fileState = await this._fetchFileState(itemPath)
-      if (fileState && await fileState.open(this.nfs(), nfsFlags)) {
-        debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+      if (fileState && await fileState.open(this.nfs(), nfsFlags)) {  // Try again with v0.9.1 (currently when file open() for write, _file.size() gives strange error: '-1016: Invalid file mode (e.g. trying to write when file is opened for reading only)')
+        debug('file (%s) opened, size: ', fileState.fileDescriptor()) // , await fileState._file.size())
         return fileState.fileDescriptor()
       } else {
         throw new Error('openFile() failed')
@@ -541,24 +545,26 @@ class NfsContainerFiles {
         let isWriteable = fileState.isWriteable()
         fileState.close(this.nfs())
         if (isWriteable) {
-          let mutationHandle = await window.safeMutableData.newMutation(this.appHandle())
+// TODO delete:          let mutationHandle = await window.safeMutableData.newMutation(this.appHandle())
 
           // TODO use/adapt this back to encrypt if the MD is private
           // let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
           // let useValue = await window.safeMutableData.encryptValue(mdHandle, value)
 
-          if (fileState.isNew()) {
-            this.nfs().insert(fileState._itemPath, fileState._file, fileState._newMetadata)
-          } else {
-            this.nfs().update(fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
-          }
+          this._safeJs.nfsArpMutate(this._mData, this.nfs(), ['Read', 'Insert', 'Update', 'Delete'],
+            (fileState.isNew() ? 'insert' : 'update'), fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
+          // if (fileState.isNew()) {
+          //   this.nfs().insert(fileState._itemPath, fileState._file, fileState._newMetadata)
+          // } else {
+          //   this.nfs().update(fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
+          // }
         }
       }
 
       return 0  // Success
     } catch (e) {
       // close/insert/update failed so invalidate cached state
-      if (fileState) this._purgeFilesState(fileState)
+      if (fileState) this._purgeFileState(fileState)
       debug(e)
     }
   }
