@@ -25,6 +25,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
+/**
+ * Authorise app, and/or request access to shared Mutable Data via SAFE Browser
+ *
+ * This code injects two methods into the nodejs SAFE API object, one for
+ * app authorisation and one to request access to a shared Mutable Data.
+ */
+
 const debug = require('debug')('safenetworkjs:cli')
 const fs = require('fs')
 const ipc = require('node-ipc')
@@ -49,6 +56,16 @@ debug = function (d) {
 // No stdout from node-ipc
 // ipc.config.silent = true
 
+// Request permissions on a shared MD
+Safe.fromUri = async (app, uri) => {
+  await app.auth.openUri(uri)
+
+  const uri2 = await ipcReceive(String(process.pid))
+
+  return app.auth.loginFromURI(uri2) // TODO change to loginFromUri for v0.9.1
+}
+
+// Request authorisation
 Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
   debug('__dirname: ' + String(__dirname))
   debug('\nSafe.bootstrap()\n  with appInfo: ' + JSON.stringify(appInfo) +
