@@ -57,7 +57,10 @@ const debug = require('debug')('safenetworkjs:file')  // Web API
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 const safeApi = require('@maidsafe/safe-node-app')
 
-const SafeJs = require('./safenetwork-api')
+// const safeJsApi = require('safenetworkjs').SafenetworkApi
+// const SafeJs = require('./safenetwork-api').SafenetworkApi
+// const SAFE_ERRORS = require('./safenetwork-api').SAFE_ERRORS
+const CONSTANTS = require('./constants').CONSTANTS
 
 const minFileDescriptor = 1
 
@@ -134,15 +137,16 @@ class _AllNfsFiles {
  *    createFile()               open(), write(), close(), insert()
  */
 class NfsFileState {
-  constructor (itemPath, file) {
-    this._isNewFile = undefined
+  constructor (itemPath, fileFetched, hasKey) {
+    this.hasKey = hasKey              // Used to decide whether to insert() or update() the entry
     this._flags = undefined           // When open, set to NFS flags (e.g. NFS_FILE_MODE_READ etc)
 
     // File identity and state
     this._fileDescriptor = undefined  // Valid only while open
     this._itemPath = itemPath
-    this._file = file                 // Defined after successful fetch (existing file) or open (new file)
-    this._version = undefined         // Version when opened
+    this._fileFetched = fileFetched   // NFS File returned by fetch (existing file)
+    this._fileOpened = undefined      // NFS File returned by open (new or existing - but lacks size, version etc)
+    this._versionOpened = undefined   // Version when opened
     this._newMetaData = undefined     // If set, will be written on closeFile()
   }
 
@@ -164,23 +168,23 @@ class NfsFileState {
     }
   }
 
+  isDeletedFile () { return this.hasKey && !this._fileFetched }
   isOpen () { return this._fileDescriptor !== undefined }
-  isNew () { return this._isNewFile }
-  version () { return this._file ? this._file._version : undefined }
+  version () { return this._fileFetched ? this._fileFetched.version : undefined }
 
-  isWriteable () {
-    return this._flags === safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
-           this._flags === safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
+  isWriteable (flags) {
+    if (!flags) flags = this._flags
+    return flags === safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
+           flags === safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
   }
 
   async create (nfs) {
     try {
-      this._file = await nfs.open()
-      if (this._file) {
+      this._fileOpened = await nfs.open()
+      if (this._fileOpened) {
         this._fileDescriptor = allNfsFiles.newDescriptor(this)
-        this._isNewFile = true
         this._flags = safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
-        this._version = 0
+        this._versionOpened = 0
         return true
       }
     } catch (e) { debug(e) }
@@ -189,11 +193,29 @@ class NfsFileState {
 
   async open (nfs, nfsFlags) {
     try {
-      this._file = await nfs.open(this._file, nfsFlags)
-      if (this._file) {
+      // this._fileOpened = this.isWriteable(nfsFlags) ? await nfs.open() : await nfs.open(this._fileFetched, nfsFlags)
+      let opened
+      if (this.isWriteable(nfsFlags)) {
+        opened = await nfs.open()
+        debug('%s opened for write')
+      } else {
+        let size
+        this.isEmptyOpen = undefined
+        try {
+          // NFS fails to open zero length files for read, so we must fake it
+          size = await this._fileFetched.size()
+          this.isEmptyOpen = (size === 0)
+        } catch (discard) {}
+
+        if (!this.isEmptyOpen) opened = await nfs.open(this._fileFetched, nfsFlags)
+        debug('%s opened for read (size: %s)', size)
+      }
+      this._fileOpened = opened
+
+      if (this._fileOpened || this.isEmptyOpen) {
         this._fileDescriptor = allNfsFiles.newDescriptor(this)
         this._flags = nfsFlags
-        this._version = this._file.version
+        this._versionOpened = this._fileFetched.version
         return true
       }
     } catch (e) { debug(e) }
@@ -204,7 +226,8 @@ class NfsFileState {
     try {
       this.releaseDescriptor()
       this._flags = undefined
-      if (this._file) this._file.close()
+      // TODO should we discard this._fileFetched here (is version, size or other state valid?)
+      if (this._fileOpened) await this._fileOpened.close()
     } catch (e) { debug(e) }
   }
 }
@@ -220,7 +243,7 @@ class NfsContainerFiles {
   getCachedFileState (itemPath, fd) {
     let fileState
     if (fd !== undefined) fileState = allNfsFiles.getFileState(fd)
-    if (!fileState) fileState = this.getFileStateFromPath(itemPath)
+    if (!fileState) fileState = this.getFileStateFromPathCache(itemPath)
     return fileState
   }
 
@@ -240,41 +263,61 @@ class NfsContainerFiles {
    * @return {NfsFileState}
    */
   async getOrFetchFileState (itemPath, fd) {
-    let nfsFileState
+    let fileState
     try {
-      nfsFileState = this.getCachedFileState(itemPath, fd)
-      if (nfsFileState) return nfsFileState
+      fileState = this.getCachedFileState(itemPath, fd)
+      if (fileState) return fileState
       return this._fetchFileState(itemPath)  // NFS fetch() and create FileState object
     } catch (e) { debug(e) }
   }
 
-  getFileStateFromPath (itemPath) {
+  getFileStateFromPathCache (itemPath) {
     return this._containerFilesMap[itemPath]
   }
 
   nfs () { return this._nfs }
 
-  async _newFileState (itemPath) {
-    debug('%s._newFileState(\'%s\', %s)', this.constructor.name, itemPath)
+  _newFileState (itemPath, file, hasKey) {
+    debug('%s._newFileState(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, file, hasKey)
     try {
-      let fileState = new NfsFileState(itemPath)
+      let fileState = new NfsFileState(itemPath, file, hasKey)
       this._containerFilesMap[itemPath] = fileState
+      debug('fileState: %o', fileState)
       return fileState
     } catch (e) { debug(e) }
   }
 
+  /**
+   * Fetch file state from the network
+   *
+   * @param  {String}  itemPath A path (NFS entry key)
+   * @return {Promise}          FileState (active or deleted), or undefined (no key entry)
+   */
   async _fetchFileState (itemPath) {
     debug('%s._fetchFileState(\'%s\', %s)', this.constructor.name, itemPath)
+    let fileState
     try {
-      let fileState
       let file = await this.nfs().fetch(itemPath)
       if (file) {
-        fileState = new NfsFileState(itemPath, file)
-        this._containerFilesMap[itemPath] = fileState
+        fileState = this._newFileState(itemPath, file, true)
+        debug('fileState fetched for: %s', itemPath)
+        debug('fileState: %o', fileState)
+      } else {
+        debug('no entry found for: %s', itemPath)
       }
-
       return fileState
-    } catch (e) { debug(e) }
+    } catch (e) {
+      if (e.code === CONSTANTS.ERROR_CODE.ENCODE_DECODE_ERROR) {
+        debug('deleted entry found: %s', itemPath)
+        fileState = this._newFileState(itemPath, undefined, true)
+        return fileState       // Deleted entry
+      } else if (e.code === CONSTANTS.ERROR_CODE.NFS_FILE_NOT_FOUND) {
+        debug('no entry found for: %s', itemPath)
+        return undefined
+      }
+      debug(e)
+      throw e   // Unexpected error so update above to handle it
+    }
   }
 
   /**
@@ -292,12 +335,17 @@ class NfsContainerFiles {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     let fileState
     try {
-      fileState = this.getFileStateFromPath(itemPath)
+      fileState = this.getFileStateFromPathCache(itemPath)
       if (fileState && fileState.isOpen()) this.closeFile(itemPath)  // If already open make sure it is closed
+      if (fileState) debug('fileState: %o', fileState)
 
       if (!fileState) fileState = await this._fetchFileState(itemPath)
-      if (fileState && await fileState.open(this.nfs(), nfsFlags)) {  // Try again with v0.9.1 (currently when file open() for write, _file.size() gives strange error: '-1016: Invalid file mode (e.g. trying to write when file is opened for reading only)')
-        debug('file (%s) opened, size: ', fileState.fileDescriptor()) // , await fileState._file.size())
+      if (fileState && await fileState.open(this.nfs(), nfsFlags)) {
+        // The File object returned by open lacks .version / .size of File object returned by fetch()
+        // This should be fixed or documented, so try again with v0.9.1
+        // Also the error is odd: currently when file open() for write, _fileOpened.size() gives strange error: '-1016: Invalid file mode (e.g. trying to write when file is opened for reading only)')
+        debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
+        debug('fileState: %o', fileState)
         return fileState.fileDescriptor()
       } else {
         throw new Error('openFile() failed')
@@ -313,23 +361,52 @@ class NfsContainerFiles {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     let fileState
     try {
-      fileState = this.getFileStateFromPath(itemPath)
+      fileState = await this.getOrFetchFileState(itemPath)
       if (fileState) {
-        if (fileState.isOpen()) this.closeFile(itemPath)  // Leave the file closed
-        throw new Error('createFile() failed - file exists')
+        if (fileState._fileFetched) throw new Error('createFile() failed - file exists')
       }
 
-      if (!fileState) fileState = await this._newFileState(itemPath)
+      if (!fileState) fileState = await this._newFileState(itemPath, undefined, false)
       if (fileState && await fileState.create(this.nfs())) {
         debug('file (%s) created: ', fileState.fileDescriptor())
+        debug('fileState: %o', fileState)
         return fileState.fileDescriptor()
       } else {
         throw new Error('createFile() failed')
       }
     } catch (e) {
-      if (fileState) fileState.releaseDescriptor() // File is not open
-      debug(e.message)
+      if (fileState) this._purgeFileState(fileState)
+      debug(e)
       throw e
+    }
+  }
+
+  async deleteFile (itemPath) {
+    debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
+    let fileState
+    try {
+      fileState = this.getFileStateFromPathCache(itemPath)
+
+      if (fileState) {
+        // POSIX unlink() decrements the file link count and removes
+        // the file when it reaches zero unless the file is open, in
+        // which case removal is delayed until close.
+        // But we ignore the state which means for an open file the
+        // file descriptor will become invalid, and any subsequent
+        // operations on it will fail.
+
+        let permissions // use defaults
+        await this._safeJs.nfsMutate(this.nfs(), permissions, 'delete',
+          itemPath, undefined, fileState.version() + 1)
+        this._purgeFileState(fileState) // File no longer exists so purge cache
+        debug('file deleted: ', itemPath)
+      } else {
+        throw new Error('file not found: ', itemPath)
+      }
+    } catch (e) {
+      if (fileState) this._purgeFileState(fileState) // Invalidate cached state
+      debug(e.message)
+      throw new Error('deleteFile() failed on: ' + itemPath)
     }
   }
 
@@ -343,7 +420,7 @@ class NfsContainerFiles {
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
-      if (fileState && fileState._file) return fileState._file.userMetadata
+      if (fileState && fileState._fileFetched) return fileState._fileFetched.userMetadata
     } catch (e) { debug(e) }
   }
 
@@ -388,18 +465,22 @@ class NfsContainerFiles {
     try {
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
-          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         } else {
           throw new Error('failed to open file')
         }
       }
-      let size = await fileState._file.size()
+      let content = ''
+      let size = await fileState._fileFetched.size()
       if (pos + len > size) len = size - pos
-      let content = await fileState._file.read(pos, len)
-      debug('%s bytes read from file.', content.byteLength)
+      if (len > 0 && fileState._fileOpened) {
+        content = await fileState._fileOpened.read(pos, len)
+        let decoder = new TextDecoder()
+        content = decoder.decode(content)
+      }
+      debug('%s bytes read from file.', content.length)
 
-      let decoder = new TextDecoder()
-      return decoder.decode(content)
+      return content
     } catch (e) {
       if (fileState) this._purgeFileState(fileState) // read() failed
       debug(e.message)
@@ -435,17 +516,24 @@ class NfsContainerFiles {
       fileState = await this.getOrFetchFileState(itemPath, fd)
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_READ)) {
-          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         } else {
           throw new Error('failed to open file')
         }
       }
-      let size = await fileState._file.size()
+
+      let size = await fileState._fileFetched.size()
       if (pos + len > size) len = size - pos
-      let readBuf = await fileState._file.read(pos, len)
-      debug('%s bytes read from file.', readBuf.byteLength)
-      buf.set(readBuf)
-      return readBuf.byteLength
+      if (len > 0 && fileState._fileOpened) {
+        let readBuf = await fileState._fileOpened.read(pos, len)
+        size = readBuf.byteLength
+        buf.set(readBuf)
+      } else {
+        size = 0
+      }
+
+      debug('%s bytes read from file.', size)
+      return size
     } catch (e) {
       if (fileState) this._purgeFileState(fileState) // read() failed
       debug(e.message)
@@ -470,19 +558,19 @@ class NfsContainerFiles {
    * @return {Promise}          String container bytes read
    */
   async writeFile (itemPath, fd, content) {
-    debug('%s.writeFile(\'%s\', %s, ...)', this.constructor.name, itemPath, fd)
+    debug('%s.writeFile(\'%s\', %s, \'%s\')', this.constructor.name, itemPath, fd, content)
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
-          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         } else {
           throw new Error('failed to open file')
         }
       }
       let bytes = content.length
-      await fileState._file.write(content)
+      await fileState._fileOpened.write(content)
       debug('%s bytes written to file.', bytes)
       return bytes
     } catch (e) {
@@ -510,18 +598,19 @@ class NfsContainerFiles {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, %s, \'%s\')', this.constructor.name, itemPath, fd, buf, len)
+    // return this.writeFileBuf_HACK(itemPath, fd, buf, len)
+    debug('%s.writeFileBuf(\'%s\', %s, \'%s\', %s)', this.constructor.name, itemPath, fd, buf.slice(0, len), len)
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
-          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._file.size())
+          debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         } else {
           throw new Error('failed to open file')
         }
       }
-      await fileState._file.write(buf.slice(0, len))
+      await fileState._fileOpened.write(buf.slice(0, len))
       debug('%s bytes written to file.', len)
       return len
     } catch (e) {
@@ -531,7 +620,28 @@ class NfsContainerFiles {
     }
   }
 
-  // TODO review error returns, maybe based on
+  // TODO remove this code which does whole create/write/close/insert in one shot
+  async writeFileBuf_HACK (itemPath, fd, buf, len) {
+    debug('%s.writeFileBuf_HACK(\'%s\', %s, \'%s\', %s)', this.constructor.name, itemPath, fd, buf.slice(0, len), len)
+    let fileState
+    try {
+      let file = await this.nfs().open()
+      let content = buf.slice(0, len)
+      await file.write(content)
+      await file.close()
+      let permissions // use defaults
+      await this._safeJs.nfsMutate(this.nfs(), permissions, 'insert',
+        itemPath, file, undefined, undefined)
+
+      return len
+    } catch (e) {
+      if (fileState) this._purgeFileState(fileState)
+      debug(e.message)
+      throw e
+    }
+  }
+
+  // TODO review error returns
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileState
@@ -539,26 +649,20 @@ class NfsContainerFiles {
       if (fd !== undefined) {
         fileState = allNfsFiles.getFileState(fd)
       }
-      if (!fileState) fileState = this.getFileStateFromPath(itemPath)
+      if (!fileState) fileState = this.getFileStateFromPathCache(itemPath)
 
       if (fileState && fileState.isOpen()) {
         let isWriteable = fileState.isWriteable()
-        fileState.close(this.nfs())
+        // Get state before it is invalidated by fileState.close()
+        let version = fileState.version()
+        await fileState.close(this.nfs())
         if (isWriteable) {
-// TODO delete:          let mutationHandle = await window.safeMutableData.newMutation(this.appHandle())
-
-          // TODO use/adapt this back to encrypt if the MD is private
-          // let useKey = await window.safeMutableData.encryptKey(mdHandle, key)
-          // let useValue = await window.safeMutableData.encryptValue(mdHandle, value)
-
-          this._safeJs.nfsArpMutate(this._mData, this.nfs(), ['Read', 'Insert', 'Update', 'Delete'],
-            (fileState.isNew() ? 'insert' : 'update'), fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
-          // if (fileState.isNew()) {
-          //   this.nfs().insert(fileState._itemPath, fileState._file, fileState._newMetadata)
-          // } else {
-          //   this.nfs().update(fileState._itemPath, fileState._file, fileState.version() + 1, fileState._newMetadata)
-          // }
+          let permissions // use defaults
+          debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
+          await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),
+            fileState._itemPath, fileState._fileOpened, version + 1, fileState._newMetadata)
         }
+        this._purgeFileState(fileState) // Invalidate cached state after closeFile()
       }
 
       return 0  // Success
