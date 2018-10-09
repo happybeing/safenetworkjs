@@ -36,6 +36,7 @@ const containerTypeCodes = {
   nfsContainer: 'nfs-container',    // an NFS container, or if in a default container an entry that ends with slash
   file: 'file',                     // an entry that doesn't end with slash
   fakeContainer: 'fake-container',  // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
+  deletedEntry: 'deleted-entry',    // entry exists, but value has been deleted()
   servicesContainer: 'services-container',  // Services container for a public name
   service: 'service',               // Services container for a public name
   notFound: 'not-found',
@@ -225,19 +226,30 @@ class SafeContainer {
            !this.isValidKey(key)
   }
 
+  isDeletedEntry (entry) {
+    return entry.value.buf.byteLength === 0
+  }
+
   encryptKeys () { return this._encryptKeys === true }
   encryptValues () { return this._encryptValues === true }
 
   async initialiseNfs () {} // Override in classes which support NFS
 
   async updateMetadata () {
+    let metadata = {
+      size: 0,
+      version: -1
+    }
+
     try {
-      this._metadata = {
+      metadata = {
         size: 1024 * 1024,  // TODO get from SAFE contants?
         version: await this._mData.getVersion()
       }
-      return this._metadata
-    } catch (e) { debug(e.message) }
+    } catch (e) { debug('%s.updateMetadata() - failure: ', this.constructor.name, e.message) }
+
+    this._metadata = metadata
+    return this._metadata
   }
 
   async getValueVersion (key) {
@@ -502,46 +514,48 @@ class SafeContainer {
       // TODO remove safe-node-app v0.8.1 code:
       let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
-        listingQ.push(new Promise(async (resolve, reject) => {
-          let decodedEntry = await this._decodeEntry(entry)
-          let plainKey = decodedEntry.plainKey
+        if (!this.isDeletedEntry(entry)) {
+          listingQ.push(new Promise(async (resolve, reject) => {
+            let decodedEntry = await this._decodeEntry(entry)
+            let plainKey = decodedEntry.plainKey
 
-        // For matching we ignore a trailing '/' so remove if present
-          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-          debug('Match Key      : ', matchKey)
-          debug('Folder Match   : ', folderMatch)
-          // Some containers don't list all entries (e.g. if they holdd metadata)
-          if (this.isHiddenEntry(plainKey)) {
-            resolve()
-            return // Skip this one
-          }
+          // For matching we ignore a trailing '/' so remove if present
+            let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+            debug('Match Key      : ', matchKey)
+            debug('Folder Match   : ', folderMatch)
+            // Ignore metadata entries
+            if (this.isHiddenEntry(plainKey)) {
+              resolve()
+              return // Skip this one
+            }
 
-          if (folderMatch === '') { // Check if the folderMatch is root of the key
-            // Item is the first part of the path
-            let item = plainKey.split('/')[0]
-            if (item && item.length && listing.indexOf(item) === -1) {
-              debug('listing-1.push(\'%s\')', item)
-              listing.push(item)
+            if (folderMatch === '') { // Check if the folderMatch is root of the key
+              // Item is the first part of the path
+              let item = plainKey.split('/')[0]
+              if (item && item.length && listing.indexOf(item) === -1) {
+                debug('listing-1.push(\'%s\')', item)
+                listing.push(item)
+              }
+            } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
+              // As the folderMatch is at the start of the key, and *shorter*,
+              // item is the first part of the path after the folder (plus a '/')
+              let item = plainKey.substring(folderMatch.length).split('/')[1]
+              if (item && item.length && listing.indexOf(item) === -1) {
+                debug('listing-2.push(\'%s\')', item)
+                listing.push(item)
+              }
+            } else if (folderMatch.indexOf(plainKey) === 0) {
+              // We've matched the key of a child container, so pass to child
+              let matchedChild = await this._getContainerForKey(plainKey)
+              let subFolder = folderMatch.substring(plainKey.length)
+              if (subFolder[0] === '/') subFolder = subFolder.substring(1)
+              let childList = await matchedChild.listFolder(subFolder)
+              listing = listing.concat(childList)
+              debug('%s.listing-3: %o', constructor.name, listing)
             }
-          } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
-            // As the folderMatch is at the start of the key, and *shorter*,
-            // item is the first part of the path after the folder (plus a '/')
-            let item = plainKey.substring(folderMatch.length).split('/')[1]
-            if (item && item.length && listing.indexOf(item) === -1) {
-              debug('listing-2.push(\'%s\')', item)
-              listing.push(item)
-            }
-          } else if (folderMatch.indexOf(plainKey) === 0) {
-            // We've matched the key of a child container, so pass to child
-            let matchedChild = await this._getContainerForKey(plainKey)
-            let subFolder = folderMatch.substring(plainKey.length)
-            if (subFolder[0] === '/') subFolder = subFolder.substring(1)
-            let childList = await matchedChild.listFolder(subFolder)
-            listing = listing.concat(childList)
-            debug('%s.listing-3: %o', constructor.name, listing)
-          }
-          resolve() // Resolve the entry's promise
-        }).catch((e) => debug(e.message)))
+            resolve() // Resolve the entry's promise
+          }).catch((e) => debug(e.message)))
+        }
       })
       await Promise.all(listingQ).catch((e) => debug(e.message))
       debug('%s.listing-4-END: %o', constructor.name, listing)
@@ -671,51 +685,53 @@ class SafeContainer {
       let entriesList = await this._listEntriesHack(entries)
       let entryQ = []
       entriesList.forEach(async (entry) => {
-        entryQ.push(new Promise(async (resolve, reject) => {
-          if (!result) {
-            let decodedEntry = await this._decodeEntry(entry)
-            let plainKey = decodedEntry.plainKey
+        if (!this.isDeletedEntry(entry)) {
+          entryQ.push(new Promise(async (resolve, reject) => {
+            if (!result) {
+              let decodedEntry = await this._decodeEntry(entry)
+              let plainKey = decodedEntry.plainKey
 
-            // let plainValue = entry.value.buf
-            // try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
-            //
-            // let enc = new TextDecoder()
-            // let plainKey = enc.decode(new Uint8Array(entry.key))
-            // if (plainKey !== entry.key.toString())
-            //   debug('Key (encrypted): ', entry.key.toString())
+              // let plainValue = entry.value.buf
+              // try { plainValue = await this._mData.decrypt(entry.value.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+              //
+              // let enc = new TextDecoder()
+              // let plainKey = enc.decode(new Uint8Array(entry.key))
+              // if (plainKey !== entry.key.toString())
+              //   debug('Key (encrypted): ', entry.key.toString())
 
-            // For matching we ignore a trailing '/' so remove if present
-            let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-            debug('Key            : ', plainKey)
-            debug('Match Key      : ', matchKey)
+              // For matching we ignore a trailing '/' so remove if present
+              let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+              debug('Key            : ', plainKey)
+              debug('Match Key      : ', matchKey)
 
-            // plainValue = enc.decode(new Uint8Array(plainValue))
-            // if (plainValue !== entry.value.buf.toString())
-            //   debug('Value (encrypted): ', entry.value.buf.toString())
-            //
-            // debug('Value            :', plainValue)
-            //
-            // debug('Version: ', entry.value.version)
+              // plainValue = enc.decode(new Uint8Array(plainValue))
+              // if (plainValue !== entry.value.buf.toString())
+              //   debug('Value (encrypted): ', entry.value.buf.toString())
+              //
+              // debug('Value            :', plainValue)
+              //
+              // debug('Version: ', entry.value.version)
 
-            if (!this.isHiddenEntry(plainKey)) {
-              // Check it the itemMatch is at the start of the key, and *shorter*
-              if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
-                // Item is the first part of the path after the folder (plus a '/')
-                let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
-                result = this[functionName](item, p2, p3, p4, p5)
-                debug('loop result-1: %o', await result)
-                resolve(result)
-              } else if (itemMatch.indexOf(plainKey) === 0) {
-                // We've matched the key of a child container, so pass to child
-                let matchedChild = await this._getContainerForKey(plainKey)
-                result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p2, p3, p4, p5)
-                debug('loop result-2: %o', await result)
-                resolve(result)
+              if (!this.isHiddenEntry(plainKey)) {
+                // Check it the itemMatch is at the start of the key, and *shorter*
+                if (plainKey.indexOf(itemMatch) === 0 && plainKey.length > itemMatch.length) {
+                  // Item is the first part of the path after the folder (plus a '/')
+                  let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
+                  result = this[functionName](item, p2, p3, p4, p5)
+                  debug('loop result-1: %o', await result)
+                  resolve(result)
+                } else if (itemMatch.indexOf(plainKey) === 0) {
+                  // We've matched the key of a child container, so pass to child
+                  let matchedChild = await this._getContainerForKey(plainKey)
+                  result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p2, p3, p4, p5)
+                  debug('loop result-2: %o', await result)
+                  resolve(result)
+                }
               }
             }
-          }
-          resolve(undefined)
-        }))
+            resolve(undefined)
+          }).catch((e) => debug(e.message)))
+        }
       })
       await Promise.all(entryQ).catch((e) => debug(e.message))
       if (result === undefined) {
@@ -814,20 +830,22 @@ class SafeContainer {
       // TODO remove safe-node-app v0.8.1 code:
       let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
-        resultQ.push(new Promise(async (resolve, reject) => {
-          let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
-          let plainKey = decodedEntry.plainKey
-          debug('Key            : ', plainKey)
-          debug('Matching against: ', itemMatch)
+        if (!this.isDeletedEntry(entry)) {
+          resultQ.push(new Promise(async (resolve, reject) => {
+            let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
+            let plainKey = decodedEntry.plainKey
+            debug('Key            : ', plainKey)
+            debug('Matching against: ', itemMatch)
 
-          if (plainKey.indexOf(itemMatch) === 0) {
-            if (!result || result.length > plainKey.length) {
-              result = plainKey
-              debug('MATCHED: ', plainKey)
+            if (plainKey.indexOf(itemMatch) === 0) {
+              if (!result || result.length > plainKey.length) {
+                result = plainKey
+                debug('MATCHED: ', plainKey)
+              }
             }
-          }
-          resolve()
-        }).catch((e) => debug(e)))
+            resolve()
+          }).catch((e) => debug(e)))
+        }
       })
       return Promise.all(resultQ).then(_ => {
         debug('MATCH RESULT: ', (result !== undefined ? result : '<no match>'))
@@ -907,6 +925,16 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'closeFile', fd)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async deleteFile (itemPath) {
+    debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'deleteFile')
     } catch (e) {
       debug(e.message)
     }
@@ -1438,12 +1466,6 @@ class NfsContainer extends SafeContainer {
     // if (!metaDescription) metaDescription = ???
   }
 
-  // TODO see if the SafeContainer listFolder can be made to handle this
-  // -> start with just deleting this:
-  // async listFolder (folderPath) {
-  //     return ['TODO', 'write-nfs-container', 'listfolder']
-  // }
-
   async itemInfo (itemPath) {
     debug('%s.itemInfo(\'%s\')', this.constructor.name, itemPath)
     try {
@@ -1475,7 +1497,11 @@ class NfsContainer extends SafeContainer {
     try {
       let fileState = await this._files.getOrFetchFileState(itemPath)
       if (fileState) {
-        type = containerTypeCodes.file
+        if (!fileState.isDeletedFile()) {
+          type = containerTypeCodes.file
+        } else {
+          type = containerTypeCodes.deletedEntry
+        }
       } else {
         let itemKey = this._subTree + itemPath
         let value = await this.getEntryValue(itemKey)
@@ -1513,12 +1539,12 @@ class NfsContainer extends SafeContainer {
   async itemAttributes (itemPath, fd) {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
+    let result = { entryType: containerTypeCodes.notFound }
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypeCodes.nfsContainer)
         await this.updateMetadata()
-        let result = {
+        result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
           modified: now,
           accessed: now,
@@ -1528,13 +1554,14 @@ class NfsContainer extends SafeContainer {
           'isFile': false,
           entryType: containerTypeCodes.nfsContainer
         }
+        debug('%s is type: %s', itemPath, result.entryType)
         return result
       }
 
       let type
       let fileState
       if (fd) {
-        fileState = await this._files.getCachedFileState(itemPath)
+        fileState = await this._files.getCachedFileState(itemPath, fd)
       } else {
         fileState = await this._files.getOrFetchFileState(itemPath)
       }
@@ -1545,33 +1572,47 @@ class NfsContainer extends SafeContainer {
         type = await this.itemType(itemPath)
       }
       if (type === containerTypeCodes.file) {
-        // File
-        return {
-          modified: fileState._file.modified,
+        // File (or new file if fileState._fileFetched is undefined)
+        let file = fileState._fileFetched
+        result = {
+          modified: file ? file.modified : now,
           accessed: now,
-          created: fileState._file.created,
-          size: fileState.isOpen() ? 0 : await fileState._file.size(),
-          version: fileState._file.version,
+          created: file ? file.created : now,
+          size: file ? await fileState._fileFetched.size() : 0,
+          version: file ? file.version : 0,
           'isFile': true,
-          entryType: containerTypeCodes.file
+          entryType: type
+        }
+      } else if (type === containerTypeCodes.deletedEntry) {
+        // Deleted entry
+        result = {
+          modified: 0,
+          accessed: 0,
+          created: 0,
+          size: 0,
+          version: -1,
+          'isFile': false,
+          entryType: type
         }
       } else {
         // Fake container
-        debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
         // Default values (used as is for containerTypeCodes.nfsContainer)
-        return {
+        result = {
           modified: now,
           accessed: now,
           created: now,
           size: 0,
           version: -1,
           'isFile': false,
-          entryType: containerTypeCodes.fakeContainer
+          entryType: type
         }
       }
     } catch (e) {
       debug(e.message)
     }
+
+    debug('%s is type: %s', itemPath, result.entryType)
+    return result
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1596,6 +1637,15 @@ class NfsContainer extends SafeContainer {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
       return this._files.closeFile(itemPath, fd)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async deleteFile (itemPath) {
+    debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
+    try {
+      return this._files.deleteFile(itemPath)
     } catch (e) {
       debug(e.message)
     }
