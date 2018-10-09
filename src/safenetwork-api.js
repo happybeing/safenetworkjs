@@ -136,6 +136,28 @@ OTHER TO THINK ABOUT
     - can I detect a change to an NFS MD and fail-safe, while refreshing container and file state?
     File entry update requires version, so I can just fail the FUSE operation
     if that has changed.
+  [ ] handle cumulative loss of NFS entries (through file delete and renaming)
+    This will not extend the capacity of an NFS container, but prevent it
+    becoming unusable because over time it fills up with unused entries
+    for files which have either been deleted or renamed.
+    The good thing about this approach is it can be implemented later, so
+    any existing 'full' containers can be brought back into use by
+    implementing this feature. Otherwise they would have to be discarded
+    by creating a new directory, manually by the user or at the app level.
+    Whereas this will do the operation automatically without an app needing
+    to handle the case.
+    Prerequisites:
+      - you must know or be able to find the owner of the NFS container
+        in order to update it to point to the new NFS container object.
+        So in the case of a services MD, you may know it via the NfsContainer
+        wrapper, or could search through the services on the account and
+        request access before initiating any changes.
+    Once capacity if reached (inser() fails due to no spare entries or MD size):
+      - create a new MD
+      - copy all active entries into it
+      - insert the new entry
+      - [optional?] insert a meta entry that points to the old MD
+      - update the object (eg services MD) to point to the new NFS container
 CONSIDER FOR  V0.2.0
   [ ] update for safe_node_app v0.9.1
     [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
@@ -292,6 +314,21 @@ if (typeof window !== 'undefined') {  // Browser SAFE DOM API
 
 let extraDebug = false
 
+/**
+ * SafenetworkJs constants, including ones not exposed by safeApi.CONSTANTS
+ */
+
+const CONSTANTS = require('./constants').CONSTANTS
+
+/**
+ * SafenetworkJs error codes (assigned to Error.code)
+ *
+ * When all error conditions have been covered, some can be replaced
+ * by the SAFE API error codes (see above).
+ */
+const SafenetworkJsErrors = []
+SafenetworkJsErrors.NO_SUCH_ENTRY = CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY // Symbol('Entry not found')
+
 /*
  * What constitutes a valid public name is not specified in the containers
  *  RFC, but the Web Hosting Manager example code specifies:
@@ -340,21 +377,6 @@ const hasSuffix = safeUtils.hasSuffix
 const filenameToBaseUri = safeUtils.filenameToBaseUri
 const getBaseUri = safeUtils.getBaseUri
 /* eslint-enable */
-
-// TODO if SAFE API starts providing error codes, replace this to use them
-// TODO ref: https://github.com/maidsafe/safe-web-hosting-manager-electron/blob/master/app/constants.js#L46
-const SafeApiErrors = []
-SafeApiErrors.ENTRY_NOT_FOUND = -106
-SafeApiErrors.ACCESS_DENIED = -100
-
-/**
- * SafenetworkJs error codes (assigned to Error.code)
- *
- * When all error conditions have been covered, some can be replaced
- * by the SAFE API error codes (see above).
- */
-const SafenetworkJsErrors = []
-SafenetworkJsErrors.ENTRY_NOT_FOUND = SafeApiErrors.ENTRY_NOT_FOUND // Symbol('Entry not found')
 
 /*
 *  Example application config for SAFE Authenticator UI
@@ -659,22 +681,44 @@ class SafenetworkApi {
    */
  //
  //
+  /**
+   * Get a list of Mutable Data Entries which excludes deleted entries
+   *
+   * @param  {MutableData}  mData
+   * @return {Promise}       Array of Entry, ie { Key, ValueVersion }
+   */
+  async activeEntriesList (mData) {
+    let entriesList = []
+    try {
+      // TODO revert to safe-node-app v0.9.1 code:
+      // let entries = await this._mData.getEntries()
+      // let entriesList = await entries.listEntries()
+      // entriesList.forEach(async (entry) => {
 
-/**
-  * Insert, update, or delete (clear) an entry in a Mutable Data
-  *
-  * @param  {MutableData}  mData     [description]
-  * @param  {String}  operation 'insert', 'update' or 'delete'
-  * @param  {String}  key
-  * @param  {String}  value
-  * @return {Promise}
-  */
+      let entries = await mData.getEntries()
+      entries.forEach(async (key, val) => {
+      })
+    } catch (e) { debug(e) }
+
+    return entriesList
+  }
+
+  /**
+    * Insert, update, or delete (clear) an entry in a Mutable Data
+    * Doesn't handle lack of permissions
+    *
+    * @param  {MutableData}  mData     [description]
+    * @param  {String}  operation 'insert', 'update' or 'delete'
+    * @param  {String}  key
+    * @param  {String}  value
+    * @return {Promise}
+    */
   async mdRawMutate (mData, operation, key, value) {
     throw new Error('TODO: implement %s.mdRawMutate()', this.constructor.name)
   }
 
  /**
-  * Insert, update, delete a Mutable Data. May auto request permissions (arp)
+  * Insert, update, delete a Mutable Data. May auto request permissions
   * @param  {MutableData}  mData     [description]
   * @param  {String}  operation 'insert', 'update' or 'delete'
   * @param  {String}  key
@@ -682,11 +726,12 @@ class SafenetworkApi {
   * @param  {Array}   permissions List of required permssions
   * @return {Promise}
   */
-  async mdArpMutate (mData, operation, key, value, permissions) {
+  async mdMutate (mData, operation, key, value, permissions) {
+    throw new Error('TODO: implement %s.mdArpMutate()', this.constructor.name)
   }
 
  /**
-  * Insert, update, or delete (clear) an entry in an NFS MD
+  * Insert, update, delete on NFS MD. Doesn't handle lack of permissions
   *
   * @param  {MutableData}  mData     [description]
   * @param  {String}  operation 'insert', 'update' or 'delete'
@@ -694,46 +739,50 @@ class SafenetworkApi {
   * @param  {String}  value
   * @return {Promise}
   */
-  async nfsRawMutate (nfs, operation, key, value) {
-    // NOT NEEDED?
+  async nfsRawMutate (nfs, operation, fileName, file, version, newMetadata) {
+    try {
+      if (operation === 'update') {
+        await nfs.update(fileName, file, version, newMetadata)
+      } else if (operation === 'insert') {
+        await nfs.insert(fileName, file, newMetadata)
+      } else if (operation === 'delete') {
+        await nfs.delete(fileName, version)
+      } else {
+        throw new Error('unknown NFS operation: ' + operation)
+      }
+    } catch (e) {
+      debug(e)
+      throw e
+    }
   }
 
  /**
-  * Insert, update, delete on NFS MD. May auto request permissions (arp)
+  * Insert, update, delete on NFS MD. May auto request permissions
   * @param  {MutableData}  mData
-  * @param  {Emulation}  nfs
-  * @param  {Array}   permissions List of required permssions
+  * @param  {NFS}     nfs         NFS emulation interface
   * @param  {String}  operation 'insert', 'update' or 'delete'
   * @param  {String}  fileName
-  * @param  {File}    file
-  * @param  {File}    version     new version of entry (for 'update' only)
-  * @param  {String}  newMetadata [optional] metadata to be set
+  * @param  {File}    file        NFS File (use undefined for 'delete')
+  * @param  {File}    version     new version of entry (use undefined for 'insert')
+  * @param  {String}  newMetadata metadata to be set (use undefined for 'delete')
   * @return {Promise}             undefined, or a new session object with additional permissions
   */
-  async nfsArpMutate (mData, nfs, permissions, operation, fileName, file, version, newMetadata) {
-    let newSession
+  async nfsMutate (nfs, permissions, operation, fileName, file, version, newMetadata) {
+    let perms = permissions | ['Read', 'Insert', 'Update', 'Delete']
     try {
-      if (operation === 'insert') {
-        await this.nfs().insert(fileName, file, newMetadata)
-      } else {
-        await this.nfs().update(fileName, file, version, newMetadata)
-      }
+      await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
     } catch (e) {
-      if (e.code === SafeApiErrors.ACCESS_DENIED) {
+      if (e.code === CONSTANTS.ERROR_CODE.ACCESS_DENIED) {
         try {
-          const nat = await mData.getNameAndTag()
+          const nat = await nfs.mData.getNameAndTag()
           const mdPermissions = [{
             type_tag: nat.type_tag, // TODO change to typeTag for v0.9.1
             name: nat.name,
-            perms: permissions
+            'perms': perms
           }]
           const uri = await this.auth.genShareMDataUri(mdPermissions)
-          newSession = await this.safeApi.fromUri(this.safeApp, uri)
-          if (operation === 'insert') {
-            await this.nfs().insert(fileName, file, newMetadata)
-          } else {
-            await this.nfs().update(fileName, file, version, newMetadata)
-          }
+          await this.safeApi.fromUri(this.safeApp, uri)
+          await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
         } catch (e) {
           throw e
         }
@@ -742,13 +791,12 @@ class SafenetworkApi {
         debug(e)
       }
     }
-    return newSession
   }
 
   /* --------------------------
    * Simplified SAFE Containers
    * --------------------------
-   *
+  p *
    * Several classes are provided to allow simpler programming of
    * the standard containers for common operations.
    *
@@ -862,7 +910,7 @@ class SafenetworkApi {
     } catch (err) {
       logApi(err)
       logApi("getMutableDataValueVersion() WARNING no entry found for key '%s'", key)
-      if (err.code !== SafeApiErrors.ENTRY_NOT_FOUND) throw err
+      if (err.code !== CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY) throw err
     }
   }
 
@@ -1146,8 +1194,8 @@ class SafenetworkApi {
   isValidPublicName (name) {
     // From the WHM code (not specified in the containers RFC)
     if (name &&
-        name.length >= PUBLICNAME_MINCHARS &&
-        name.length <= PUBLICNAME_MAXCHARS &&
+        name.length >= CONSTANTS.PUBLICNAME_MINCHARS &&
+        name.length <= CONSTANTS.PUBLICNAME_MAXCHARS &&
         name.match(/^[a-z0-9]*$/)) {
       return true
     }
@@ -1165,7 +1213,7 @@ class SafenetworkApi {
   async _createPublicName (publicName) {
     logApi('_createPublicName(%s)...', publicName)
     try {
-      if (!this.isValidPublicName(publicName)) throw new Error('A public name ' + BADPUBLICNAME_MSG)
+      if (!this.isValidPublicName(publicName)) throw new Error('A public name ' + CONSTANTS.BADPUBLICNAME_MSG)
 
       // Check for an existing entry (before creating services MD)
       let entry = null
@@ -2945,7 +2993,7 @@ module.exports.containerTypeCodes = containers.containerTypeCodes
 module.exports.fullPermissions = fullPermissions
 
 module.exports.ERRORS = SafenetworkJsErrors
-module.exports.SAFE_ERRORS = SafeApiErrors
+// module.exports.SAFE_ERRORS = SafeApiErrors
 
 // TODO ??? change to export class, something like this (example rdflib Fetcher.js)
 // class SafenetworkApi {...}
