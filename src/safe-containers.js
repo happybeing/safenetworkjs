@@ -264,7 +264,8 @@ class SafeContainer {
   async getEntryValue (key) {
     try {
       let valueVersion = await this._safeJs.getMutableDataValueVersion(this._mData, key)
-      return (valueVersion ? valueVersion.buf : undefined)
+      // For no entry or deleted entry return undefined
+      return (valueVersion && valueVersion.buf.byteLength !== 0 ? valueVersion.buf : undefined)
     } catch (e) {
       debug('%s.getEntryValue(%s) failed', this.constructor.name, key)
       throw e
@@ -1492,7 +1493,7 @@ class NfsContainer extends SafeContainer {
 
   async itemType (itemPath) {
     debug('%s.itemType(\'%s\')', this.constructor.name, itemPath)
-    let type = containerTypeCodes.notValid
+    let type
 
     try {
       let fileState = await this._files.getOrFetchFileState(itemPath)
@@ -1502,7 +1503,9 @@ class NfsContainer extends SafeContainer {
         } else {
           type = containerTypeCodes.deletedEntry
         }
-      } else {
+      }
+      // Check for a defaultContainer or fakeContainer
+      if (!type || type === containerTypeCodes.deletedEntry) {
         let itemKey = this._subTree + itemPath
         let value = await this.getEntryValue(itemKey)
         if (value) {  // itemPath exact match with entry key, so determine entry type for this container
@@ -1515,7 +1518,7 @@ class NfsContainer extends SafeContainer {
           let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
           if (shortestEnclosingKey) {
             type = containerTypeCodes.fakeContainer
-          } else {
+          } else if (!type) {
             type = containerTypeCodes.notFound
           }
         }
