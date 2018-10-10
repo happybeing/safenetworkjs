@@ -106,16 +106,19 @@
           [/] announce
 [ ] Next Release v0.2.0
 == safe-containers.js ==
-=>[ ] BUG ls of a public name with one additional character does not generate an error to the user
   [ ] implement simplified file interface for example:
     [/] first consider using file descriptors so that open/read/write/close
         can operate with less redundant calls (e.g. repeated fetch/open in
         each readFileBuf() call). But discuss gains with Maidsafe first if
         no obvious efficiencies in my code.
         See Maidsafe response: https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
-    [ ] saveFile(path, [create])
+    [/] saveFile(path, [create])
+    [/] copyFile(src, dest)
+    [/] moveFile(src, dest) (rename)
+    [/] deleteFile(path)
+    [ ] speed up: getattr() cache?
+    [ ] makeFolder(path) (mkdir) (virtual folders that exist for the session)
     [ ] fileExists(path)
-    [ ] deleteFile(path)
   [ ] cleaner code:
     [ ] migrate to ES6 import etc
     [ ] is it supported by nexe?
@@ -125,6 +128,8 @@
     [ ] test in safenetwork-fuse branch
     [ ] done!
   [ ] adopt: import { CONSTANTS as SAFE_CONSTANTS } from '@maidsafe/safe-node-app'
+  [ ] BUG ls of a public name with one additional character does not generate an error to the user
+  [ ] BUG gedit load, edit, save file fails and overwrites leaving empty file (error message: Cannot handle "file:" locations in write mode)
 OTHER TO THINK ABOUT
   [/] multiple desktop applications writing to the same file via safenetwork-fuse
     - can I fail open() for read, when open, and block open for write() if open at all?
@@ -137,6 +142,9 @@ OTHER TO THINK ABOUT
     File entry update requires version, so I can just fail the FUSE operation
     if that has changed.
   [ ] handle cumulative loss of NFS entries (through file delete and renaming)
+    Hold off on the following thougts, pending discussion of a change in NFS
+    implementation: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
+
     This will not extend the capacity of an NFS container, but prevent it
     becoming unusable because over time it fills up with unused entries
     for files which have either been deleted or renamed.
@@ -152,7 +160,7 @@ OTHER TO THINK ABOUT
         So in the case of a services MD, you may know it via the NfsContainer
         wrapper, or could search through the services on the account and
         request access before initiating any changes.
-    Once capacity if reached (inser() fails due to no spare entries or MD size):
+    Once capacity if reached (insert() fails due to no spare entries or MD size):
       - create a new MD
       - copy all active entries into it
       - insert the new entry
