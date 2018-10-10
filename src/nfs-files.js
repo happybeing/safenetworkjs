@@ -331,6 +331,62 @@ class NfsContainerFiles {
     }
   }
 
+  /**
+   * Copy an immutable file (re-using existing immutable data)
+   *
+   * Supports copying a file within a single NFS container (not between
+   * containers).
+   * @param  {String}  sourcePath
+   * @param  {String}  destinationPath
+   * @param  {Boolean} copyMetadata    [optional] if true, copies all file metadata (so like 'move')
+   * @return {Promise}                 [description]
+   */
+  async copyFile (sourcePath, destinationPath, copyMetadata) {
+    debug('%s.copyFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath, copyMetadata)
+    try {
+      let srcFileState = await this.getOrFetchFileState(sourcePath)
+      if (!srcFileState) throw new Error('copyFile error - source file not found:', sourcePath)
+
+      if (!copyMetadata) {
+        // TODO need to clear and reset metadata in srcFileState._fileFetched before
+        // Have asked for advice on how to do this: https://forum.safedev.org/t/implementing-nfs-api-rename/2109/5?u=happybeing
+      }
+      let perms // If auth needed, request default permissions
+      let destFileState = await this.getOrFetchFileState(destinationPath)
+      if (!destFileState) {
+        // Destination is a new file, so insert
+        await this._safeJs.nfsMutate(this.nfs(), perms, 'insert', destinationPath, srcFileState._fileFetched)
+      } else {
+        // Destination exists, so update
+        await this._safeJs.nfsMutate(this.nfs(), perms, 'update', destinationPath, srcFileState._fileFetched, destFileState.version() + 1)
+        await this._purgeFileState(destFileState) // New file so purge the cache
+      }
+      // After using the fetched file to update another entry, it takes on the version of the other, so needs refreshing
+      await this._purgeFileState(srcFileState)
+    } catch (e) {
+      debug(e)
+      throw e
+    }
+  }
+
+  /**
+   * Move a file to a new name or path in the same container
+   *
+   * @param  {String}  sourcePath
+   * @param  {String}  destinationPath
+   * @return {Promise}
+   */
+  async moveFile (sourcePath, destinationPath) {
+    debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath)
+    try {
+      await this.copyFile(sourcePath, destinationPath, true)
+      await this.deleteFile(sourcePath)
+    } catch (e) {
+      debug(e)
+      throw e
+    }
+  }
+
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     let fileState
@@ -385,7 +441,7 @@ class NfsContainerFiles {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     let fileState
     try {
-      fileState = this.getFileStateFromPathCache(itemPath)
+      fileState = await this.getOrFetchFileState(itemPath)
 
       if (fileState) {
         // POSIX unlink() decrements the file link count and removes

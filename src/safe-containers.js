@@ -230,6 +230,18 @@ class SafeContainer {
     return entry.value.buf.byteLength === 0
   }
 
+  // Check if key exists and is not deleted
+  async isActiveKey (itemPath) {
+    try {
+      let entry = await this._mData.get(itemPath)
+      if (!entry || this.isDeletedEntry(entry)) return false
+      return true
+    } catch (e) {
+      debug(e)
+      return false
+    }
+  }
+
   encryptKeys () { return this._encryptKeys === true }
   encryptValues () { return this._encryptValues === true }
 
@@ -936,6 +948,16 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'deleteFile')
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  async renameFile (itemPath, newItemPath, newFullPath) {
+    debug('%s.renameFile(\'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
+    try {
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, 'renameFile', newItemPath, newFullPath)
     } catch (e) {
       debug(e.message)
     }
@@ -1651,6 +1673,39 @@ class NfsContainer extends SafeContainer {
       return this._files.deleteFile(itemPath)
     } catch (e) {
       debug(e.message)
+    }
+  }
+
+  // Note: FUSE or the file system appears to check validity of the
+  // operation before calling rename() so we can just concentrate
+  // on implementing operations that we support.
+  //
+  // For now, we will only support rename() within a single container,
+  // and only of a filename rather than a directory. The reason
+  // for this is that I am advocating possible changes in implementation
+  // here: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
+  //
+  // POSIX Ref: http://pubs.opengroup.org/onlinepubs/9699919799/
+  async renameFile (itemPath, newItemPath, newFullPath) {
+    debug('%s.renameFile(\'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
+
+    try {
+      // Don't allow renaming directories because it can use up a lot of entries fast
+      // See: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
+      let srcIsFile = await this.isActiveKey(itemPath)
+      if (!srcIsFile) throw new Error('cannot rename a directory')
+
+      // Make newItemPath relative to container root (itemPath is already relative)
+      let trimmedNewPath = newItemPath
+      if (this._parentEntryKey) trimmedNewPath = (this._parent._subTree + newItemPath).substring(this._parentEntryKey.length + 1)
+
+      if (itemPath === trimmedNewPath) return // Rename to self so do nothing
+
+      await this._files.moveFile(itemPath, trimmedNewPath)
+      return true
+    } catch (e) {
+      debug(e)
+      return false
     }
   }
 
