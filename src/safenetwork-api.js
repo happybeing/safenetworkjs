@@ -111,13 +111,87 @@
         can operate with less redundant calls (e.g. repeated fetch/open in
         each readFileBuf() call). But discuss gains with Maidsafe first if
         no obvious efficiencies in my code.
-        See Maidsafe response: https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
+        See Maidsafe response:
+        https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
     [/] saveFile(path, [create])
     [/] copyFile(src, dest)
     [/] moveFile(src, dest) (rename)
     [/] deleteFile(path)
     [ ] speed up: getattr() cache?
-    [ ] makeFolder(path) (mkdir) (virtual folders that exist for the session)
+    [ ] Support for Directories/Folders
+        DESIGN
+      [ ] implement a way for each NFS Container to call FUSE cache invalidation
+          functions for each FUSE path at which a path appears. How? Perhaps
+          when a SafenetworkJs container is mounted, it is given the cache
+          object to be called from relevant functions (ie closeFile, safeFile,
+          removeFile etc)
+      [ ] makeFolder()
+        - Note: SafenetworkJs doesn't need virtual directories because createFile() etc
+        accept an arbitrary path and will create a file on any given path.
+        - makeFolder() is still useful in some situations, not to create virtual
+        directories, but for example to create and add an NFS container to
+        one of the default containers such as _public. I think makeFolder()
+        should work for any path within _public, but fail for any path that
+        strays into an NFS container (as we don't support nesting of NFS
+        containers, they are only able to hold files, with folders being
+        implied by the paths of those files).
+      [ ] I also propose that attempting to save a file (FUSE or SafentworkJs) to
+        a path which lies within a default container (e.g. _public) should be
+        allowed even though files cannot be stored directly in default
+        containers. The effect of trying to create a file in a default
+        container would be to create an NFS container at the corresponding
+        path, and then save the file into the NFS container.
+      [ ] FUSE SafeVfs: mkdir()
+        - no need to check if the directory exists because FUSE won't call this
+          if it does. So just create a virtual directory path entry:
+            call vfsCache.addDirectory(itemPath)
+      [ ] FUSE SafeVfs: rmdir().
+          Calls vfsCache.removeDirectory(itemPath), and it fails (ie there is no
+          virtual directory), return a unsupported operation (Fuse.OPNOTSUP). The
+          error will happen if the user tries to remove an NFS directory, either
+          in _public or an NFS container, or a directory which is part of a
+          path to a file or container.
+          It would be possible to support rmdir() in _public where the path
+          corresponds to an NFS container, but users will be confused that
+          most such directories can't be removed so I don't think it is
+          worth implementing.
+      [ ] _public makeFolder()
+        - if the path is within _public, creates NFS container there
+        - if the path is within an NFS container, it returns an error
+      [ ] _publc listFolder()
+        - the above description of _public makeFolder() permits an NFS folder
+          to exist at a path that is a parent of another path within a default
+          container. For example, the following entries would be permitted
+          in _public:
+            _public/one/two/three/
+            _public/one/
+          This results in an NFS container at the end of each of the above paths
+          and means that listFolder() for default containers needs to merge
+          the results of its keys and the root content of the container where
+          one container's root path is part of that for another container, as
+          above. In that example listFolder('_public/one') would contain 'two'
+          from the _public container, plus all of the files and folders in
+          the NFS container who's root path is _public/one.
+      [ ] Clearing virtual directory paths
+        - they are all forgotten at the end of a session = easy
+        - on creating a file which resides at the leaf of a virtual directory:
+        [ ] when to call vfsCache.removeDrectory(itemPath):
+        - call it on every successful release() (ie file close). It is only
+          needed for a close() following create(), but since there won't be
+          a virtual directory to release except after create()/release() it is
+          ok to try and clear paths that aren't virtual. The only problem
+          would be clearing one that is still needed, but after release
+          the file must exist, so it won't ever need a virtual directory.
+        [ ] Deleting the last file in a directory:
+        - should deleting the last file in directory create a virtual
+          directory? Ideally yes, because it will be odd for directories
+          to disappear if you delete the last file. It might be tricky
+          to do, but without it, the current directory will disappear
+          and that may be an issue - almost certainly generating errors
+          that will confuse the user.
+        - this is a harder issue, but in the short term we could just
+          call getattr() on the folder at the end of every unlink()
+          and see how that works.
     [ ] fileExists(path)
   [ ] cleaner code:
     [ ] migrate to ES6 import etc
@@ -177,18 +251,16 @@ CONSIDER FOR  V0.2.0
       - PREFERRED: 'ghost' folders held in memory by SafeContainer (wiped on
       destruction or saved only on the client). Might double as a local FS cache?
   [ ] implement caching in safe-containers.js
-    [ ] gather some performance/profiling info (even very crude is good)
-    [ ] review info from Maidsafe on API GET use
+    [x] gather some performance/profiling info (even very crude is good)
+    [/] review info from Maidsafe on API GET use
         see https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
-    First thoughts:
-      - cache entry: MD version, nfs, listEntries() result, entryCache to any entry with
-      - entry cache: any File object, file state (closed, open-for-read, open-for-write), file descriptor?
-      - wrapper getListEntries() for listEntries() - checks MD version and optionally refreshes stored cache entry
-      - wrappers for nfs() file operations: fetch(), open(), read(), write(), close() ??? - use per entry cached value if avail
-      - implement with a caching on/off flag
     [ ] re-use of safe-container.js container by searching map by xor address:
-      [ ] implement with on/off flag
-      [ ] compare performance
+      This is necessary for exteral caching (eg by SAFE Drive / safenetwork-fuse)
+      so that if a SAFE NFS container is being accessed with different parent
+      containers (or stand-alone), so that only a single SafeContainer cache
+      exists. Otherwise, if there were multiple NfsContainers for the same
+      SAFE container, modifications via one NfsContainer would not be
+      reflected in the cache of the other.
   [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
   [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
     [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)

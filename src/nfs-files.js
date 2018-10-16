@@ -247,6 +247,11 @@ class NfsContainerFiles {
     return fileState
   }
 
+  isWriteable (itemPath, fd) {
+    let fileState = this.getCachedFileState(itemPath, fd)
+    return (fileState && fileState.isWriteable())
+  }
+
   /**
    * get cached state from file descriptor or path
    *

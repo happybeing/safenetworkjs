@@ -150,6 +150,8 @@ class SafeContainer {
     this._parent = (parent === undefined ? undefined : parent)
     this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
     this._tagType = (tagType === undefined ? undefined : tagType)
+
+    this._resultHoldersMap = [] // Filesystem results cached by operation and container key
   }
 
   /**
@@ -1066,6 +1068,48 @@ class SafeContainer {
       debug(e.message)
     }
   }
+
+  /** File system operation results cache
+  */
+
+  _clearCacheForCreateFile (itemPath) {
+    let base = u.itemPathBasename(itemPath)
+    if (base) this._clearResultForPath(itemPath)
+  }
+
+  _clearCacheForModify (itemPath) {
+    let base = u.itemPathBasename(itemPath)
+    if (base !== itemPath) this._clearResultForPath(base)
+  }
+
+  _clearCacheForDelete (itemPath) {
+    this.clearResultForPath(itemPath)
+    let base = u.itemPathBasename(itemPath)
+    if (base !== itemPath) this._clearResultDelete(base) // Recurse to clear all parent folders
+  }
+
+  _clearResultForPath (itemPath) {
+    this._resultHoldersMap[itemPath] = undefined
+  }
+
+  // Store fileOperation result in _resultHoldersMap and return a resultsRef
+  _saveResultForPath (itemPath, fileOperation, operationResult) {
+    let resultHolder = this._resultHoldersMap[itemPath]
+    if (!resultHolder) {
+      resultHolder = {}
+      this._resultHoldersMap[itemPath] = resultHolder
+    }
+
+    resultHolder[fileOperation] = operationResult
+
+    // Return a resultsRef
+    return {
+      resultsMap: this._resultHolderMap,
+      resultsKey: itemPath,
+      result: operationResult,
+      'fileOperation': fileOperation  // For debugging only
+    }
+  }
 }
 
 /**
@@ -1564,6 +1608,35 @@ class NfsContainer extends SafeContainer {
   async itemAttributes (itemPath, fd) {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
+    try {
+      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
+      if (resultsRef) return resultsRef.currentResult
+    } catch (e) {
+      debug(e)
+    }
+  }
+
+  /**
+   * Get attributes of a file or directory as a resultsRef object
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor (if file is open)
+   * @return {Promise}          object containing result plus resultsMap, resultsKey for looking up a resultHolder
+   */
+  async itemAttributesResultRef (itemPath, fd) {
+    debug('%s.itemAttributesResultsRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
+    let fileOperation = 'itemAttributes'
+
+    // Look for a resultsRef
+    let resultHolder = this._resultHoldersMap[itemPath]
+    if (resultHolder && resultHolder[fileOperation]) {
+      return {
+        resultsMap: this._resultHolderMap,
+        resultsKey: itemPath,
+        result: resultHolder[fileOperation],
+        'fileOperation': fileOperation  // For debugging only
+      }
+    }
+
     let result = { entryType: containerTypeCodes.notFound }
     const now = Date.now()
     try {
@@ -1580,7 +1653,7 @@ class NfsContainer extends SafeContainer {
           entryType: containerTypeCodes.nfsContainer
         }
         debug('%s is type: %s', itemPath, result.entryType)
-        return result
+        return this._saveResultForPath(itemPath, fileOperation, result)
       }
 
       let type
@@ -1637,7 +1710,7 @@ class NfsContainer extends SafeContainer {
     }
 
     debug('%s is type: %s', itemPath, result.entryType)
-    return result
+    return this._saveResultForPath(itemPath, fileOperation, result)
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1652,6 +1725,7 @@ class NfsContainer extends SafeContainer {
   async createFile (itemPath) {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     try {
+      this._clearCacheForModify(itemPath)
       return this._files.createFile(itemPath)
     } catch (e) {
       debug(e.message)
@@ -1661,6 +1735,7 @@ class NfsContainer extends SafeContainer {
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
+      if (this._files.isWriteable(itemPath, fd)) this._clearCacheForModify(itemPath)
       return this._files.closeFile(itemPath, fd)
     } catch (e) {
       debug(e.message)
@@ -1670,6 +1745,7 @@ class NfsContainer extends SafeContainer {
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     try {
+      this._clearCacheForDelete(itemPath)
       return this._files.deleteFile(itemPath)
     } catch (e) {
       debug(e.message)
@@ -1702,6 +1778,7 @@ class NfsContainer extends SafeContainer {
       if (itemPath === trimmedNewPath) return // Rename to self so do nothing
 
       await this._files.moveFile(itemPath, trimmedNewPath)
+      this._clearCacheForModify(itemPath)
       return true
     } catch (e) {
       debug(e)
@@ -1733,6 +1810,7 @@ class NfsContainer extends SafeContainer {
    */
   async setFileMetadata (itemPath, fd, metadata) {
     try {
+      this._clearCacheForModify(itemPath)
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
       debug(e.message)
