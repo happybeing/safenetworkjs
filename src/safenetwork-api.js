@@ -3089,6 +3089,7 @@ module.exports.testsNoAuth = SafenetworkApi.prototype.testsNoAuth.bind(safeWeb)
 module.exports.testsAfterAuth = SafenetworkApi.prototype.testsAfterAuth.bind(safeWeb)
 */
 
+module.exports.safeUtils = safeUtils
 module.exports.isFolder = safeUtils.isFolder
 module.exports.docpart = safeUtils.docpart
 module.exports.pathpart = safeUtils.pathpart

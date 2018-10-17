@@ -151,7 +151,7 @@ class SafeContainer {
     this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
     this._tagType = (tagType === undefined ? undefined : tagType)
 
-    this._resultHoldersMap = [] // Filesystem results cached by operation and container key
+    this._resultHolderMap = [] // Filesystem results cached by operation and container key
   }
 
   /**
@@ -869,14 +869,34 @@ class SafeContainer {
     } catch (e) { debug(e) }
   }
 
-  async itemAttributes (itemPath) {
-    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
+  /**
+   * Get attributes of a file or directory
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor (if file is open)
+   * @return {Promise}          attributes object
+   */
+  async itemAttributes (itemPath, fd) {
+    debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
+
+    try {
+      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      if (resultsRef) return resultsRef.result
+    } catch (e) {
+      debug(e)
+    }
+  }
+
+  async itemAttributesResultRef (itemPath, fd) {
+    debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
+    let fileOperation = 'itemAttributes'
+
     const now = Date.now()
+    let result
     try {
       if (this.isSelf(itemPath)) {
         debug('%s is type: %s', itemPath, containerTypeCodes.defaultContainer)
         await this.updateMetadata()
-        return {
+        result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
           modified: now,
           accessed: now,
@@ -888,35 +908,42 @@ class SafeContainer {
         }
       }
 
-      let type = await this.itemType(itemPath)
-      if (type === containerTypeCodes.file ||
-          type === containerTypeCodes.nfsContainer ||
-          type === containerTypeCodes.service ||
-          type === containerTypeCodes.servicesContainer) {
-        debug('%s is type: %s', itemPath, type)
-        return await this.callFunctionOnItem(itemPath, 'itemAttributes')
+      let type
+      if (!result) {
+        type = await this.itemType(itemPath)
+        if (type === containerTypeCodes.file ||
+            type === containerTypeCodes.nfsContainer ||
+            type === containerTypeCodes.service ||
+            type === containerTypeCodes.servicesContainer) {
+          debug('%s is type: %s', itemPath, type)
+          result = await this.callFunctionOnItem(itemPath, 'itemAttributes')
+        }
       }
 
-      if (type === containerTypeCodes.fakeContainer) {
-        // Fake container
-        debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
-        // Default values (used as is for containerTypeCodes.nfsContainer)
-        return {
-          modified: now,
-          accessed: now,
-          created: now,
-          size: 0,
-          version: -1,
-          'isFile': false,
-          entryType: type
+      if (!result) {
+        if (type === containerTypeCodes.fakeContainer) {
+          // Fake container
+          debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
+          // Default values (used as is for containerTypeCodes.nfsContainer)
+          result = {
+            modified: now,
+            accessed: now,
+            created: now,
+            size: 0,
+            version: -1,
+            'isFile': false,
+            entryType: type
+          }
+        } else if (type === containerTypeCodes.notFound) {
+          result = { entryType: type }
         }
-      } else if (type === containerTypeCodes.notFound) {
-        return { entryType: type }
       }
     } catch (e) {
       debug(e.message)
       throw e
     }
+
+    return this._saveResultForPath(itemPath, fileOperation, result)
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1089,15 +1116,15 @@ class SafeContainer {
   }
 
   _clearResultForPath (itemPath) {
-    this._resultHoldersMap[itemPath] = undefined
+    this._resultHolderMap[itemPath] = undefined
   }
 
-  // Store fileOperation result in _resultHoldersMap and return a resultsRef
+  // Store fileOperation result in _resultHolderMap and return a resultsRef
   _saveResultForPath (itemPath, fileOperation, operationResult) {
-    let resultHolder = this._resultHoldersMap[itemPath]
+    let resultHolder = this._resultHolderMap[itemPath]
     if (!resultHolder) {
       resultHolder = {}
-      this._resultHoldersMap[itemPath] = resultHolder
+      this._resultHolderMap[itemPath] = resultHolder
     }
 
     resultHolder[fileOperation] = operationResult
@@ -1374,14 +1401,34 @@ class ServicesContainer extends SafeContainer {
     } catch (error) { debug(error.message) }
   }
 
-  async itemAttributes (itemPath) {
-    debug('%s.itemAttributes(\'%s\')', this.constructor.name, itemPath)
+  /**
+   * Get attributes of a file or directory
+   * @param  {String}  itemPath
+   * @param  {Number}  fd       [optional] file descriptor (if file is open)
+   * @return {Promise}          attributes object
+   */
+  async itemAttributes (itemPath, fd) {
+    debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
+
+    try {
+      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      if (resultsRef) return resultsRef.result
+    } catch (e) {
+      debug(e)
+    }
+  }
+
+async itemAttributesResultRef (itemPath) {
+    debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
+    let fileOperation = 'itemAttributes'
+
+    let result
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
         debug('%s is type: %s', itemPath, containerTypeCodes.servicesContainer)
         await this.updateMetadata()
-        return {
+        result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
           modified: now,
           accessed: now,
@@ -1393,18 +1440,20 @@ class ServicesContainer extends SafeContainer {
         }
       }
 
-      let type = containerTypeCodes.service
-      let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
-      if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
-        // Service with container, so pass to child
-        debug('%s has a container: %s', itemPath, type)
-        return await this.callFunctionOnItem(itemPath, 'itemAttributes')
+      if (!result) {
+        let type = containerTypeCodes.service
+        let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
+        if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
+          // Service with container, so pass to child
+          debug('%s has a container: %s', itemPath, type)
+          result = await this.callFunctionOnItem(itemPath, 'itemAttributes')
+        }
       }
 
       // Service without its own container (or unkown service)
       debug('%s is type: %s', itemPath, type)
       // Default values (used as is for containerTypeCodes.nfsContainer)
-      return {
+      result = {
         modified: now,
         accessed: now,
         created: now,
@@ -1416,6 +1465,8 @@ class ServicesContainer extends SafeContainer {
     } catch (e) {
       debug(e.message)
     }
+
+    return this._saveResultForPath(itemPath, fileOperation, result)
   }
 }
 
@@ -1609,8 +1660,8 @@ class NfsContainer extends SafeContainer {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
-      if (resultsRef) return resultsRef.currentResult
+      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      if (resultsRef) return resultsRef.result
     } catch (e) {
       debug(e)
     }
@@ -1623,11 +1674,11 @@ class NfsContainer extends SafeContainer {
    * @return {Promise}          object containing result plus resultsMap, resultsKey for looking up a resultHolder
    */
   async itemAttributesResultRef (itemPath, fd) {
-    debug('%s.itemAttributesResultsRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
+    debug('%s.itemAttributesResultRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileOperation = 'itemAttributes'
 
     // Look for a resultsRef
-    let resultHolder = this._resultHoldersMap[itemPath]
+    let resultHolder = this._resultHolderMap[itemPath]
     if (resultHolder && resultHolder[fileOperation]) {
       return {
         resultsMap: this._resultHolderMap,
