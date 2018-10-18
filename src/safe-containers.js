@@ -44,6 +44,20 @@ const containerTypeCodes = {
 }
 
 /**
+ * Check if results for this container type should be cached
+ * @param  {String} containerType a value from containerTypeCodes
+ * @return {Boolean} true if the type should have cached results
+ */
+function isCacheableResult (containerType) {
+  return containerType === containerTypeCodes.defaultContainer ||
+         containerType === containerTypeCodes.nfsContainer ||
+         containerType === containerTypeCodes.file ||
+         containerType === containerTypeCodes.fakeContainer ||
+         containerType === containerTypeCodes.servicesContainer ||
+         containerType === containerTypeCodes.sercice
+}
+
+/**
  * A cache used by the filesystem (FS) interface methods of SafeContainer
  *
  * More than just a cache, this tracks the parent child entries which
@@ -406,6 +420,10 @@ class SafeContainer {
     throw new Error(msg)
   }
 
+  // TODO BUG using 'key' on containerMap is not unique enough because
+  //      could have different NFS containers at the same key in different
+  //      parents (e.g. one in _public, one in _documents). So this
+  //      needs to be based on the full path including parent.
   async _getContainerForKey (key) {
     debug('%s._getContainerForKey(\'%s\')', this.constructor.name, key)
 
@@ -943,7 +961,7 @@ class SafeContainer {
       throw e
     }
 
-    return this._saveResultForPath(itemPath, fileOperation, result)
+    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1096,15 +1114,45 @@ class SafeContainer {
     }
   }
 
+  /**
+   * Truncate a file to size bytes (only implements size === 0)
+   *
+   * @private This function is implemented purely to allow FUSE to open a
+   * file for append, but overwrite it by first truncating its size to zero.
+   * This is needed because POSIX open() only has flags for write, not for
+   * append. But since SAFE NFS lacks file truncate, we can only truncate
+   * to zero which we do be creating a new file with NFS open().
+   *
+   * When opening a SAFE NFS file for write we must 'append', otherwise FUSE
+   * would have now way to append (since it can only open() for write, not
+   * write with append). In turn, the ony way to allow FUSE to be able to open
+   * and overwrite an existing NFS file is to implement truncate at size zero.
+   *
+   * @param  {String}  itemPath
+   * @param  {Number}  fd
+   * @param  {Number}  size
+   * @return {Promise}
+   */
+  async _truncateFile (itemPath, fd, size) {
+    debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
+    try {
+      if (size !== 0) throw new Error('truncateFile() not implemented for size other than zero')
+      // Default is a container of containers, not files so pass to child container
+      return await this.callFunctionOnItem(itemPath, '_truncateFile', fd, size)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
   /** File system operation results cache
   */
-
   _clearCacheForCreateFile (itemPath) {
     let base = u.itemPathBasename(itemPath)
     if (base) this._clearResultForPath(itemPath)
   }
 
   _clearCacheForModify (itemPath) {
+    this._clearResultForPath(itemPath)
     let base = u.itemPathBasename(itemPath)
     if (base !== itemPath) this._clearResultForPath(base)
   }
@@ -1112,22 +1160,46 @@ class SafeContainer {
   _clearCacheForDelete (itemPath) {
     this.clearResultForPath(itemPath)
     let base = u.itemPathBasename(itemPath)
-    if (base !== itemPath) this._clearResultDelete(base) // Recurse to clear all parent folders
+    if (base !== itemPath) this._clearResultForDelete(base) // Recurse to clear all parent folders
   }
 
   _clearResultForPath (itemPath) {
-    this._resultHolderMap[itemPath] = undefined
+    debug('%s._clearResultForPath(%s)', this.constructor.name, itemPath)
+    delete this._resultHolderMap[itemPath]
+    // Parent container has a cache too:
+    // TODO when containers have multiple parents, make this iterate over _parents[]
+    if (this._parent) this._parent._clearCacheForChildContainer(this._containerPath, itemPath)
   }
 
-  // Store fileOperation result in _resultHolderMap and return a resultsRef
-  _saveResultForPath (itemPath, fileOperation, operationResult) {
+  // Called by a child container to clear our cache entry
+  _clearCacheForChildContainer (childContainerPath, childItemPath) {
+    let pathPrefix = this._subTree
+    if (this._subTree[0] === '/') pathPrefix = this._subTree.substring(1)
+    let itemPath = childContainerPath.substring(pathPrefix.length) + childItemPath
+    this._clearResultForPath(itemPath)
+  }
+
+  /**
+   * Update _resultHolderMap and return a resultsRef
+   *
+   * @param  {String} itemPath
+   * @param  {String} fileOperation
+   * @param  {Object} operationResult
+   * @param  {Boolean} cacheTheResult if true updates cache, otherwise clears it
+   * @return {Object} A 'resultsRef' which has the result, its cache location
+   */
+  _updateResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
     let resultHolder = this._resultHolderMap[itemPath]
     if (!resultHolder) {
       resultHolder = {}
       this._resultHolderMap[itemPath] = resultHolder
     }
 
-    resultHolder[fileOperation] = operationResult
+    if (cacheTheResult) {
+      resultHolder[fileOperation] = operationResult
+    } else {
+      this._clearResultForPath(itemPath)
+    }
 
     // Return a resultsRef
     return {
@@ -1418,7 +1490,7 @@ class ServicesContainer extends SafeContainer {
     }
   }
 
-async itemAttributesResultRef (itemPath) {
+  async itemAttributesResultRef (itemPath) {
     debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
 
@@ -1440,8 +1512,9 @@ async itemAttributesResultRef (itemPath) {
         }
       }
 
+      let type
       if (!result) {
-        let type = containerTypeCodes.service
+        type = containerTypeCodes.service
         let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
         if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
           // Service with container, so pass to child
@@ -1466,7 +1539,7 @@ async itemAttributesResultRef (itemPath) {
       debug(e.message)
     }
 
-    return this._saveResultForPath(itemPath, fileOperation, result)
+    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
   }
 }
 
@@ -1688,7 +1761,7 @@ class NfsContainer extends SafeContainer {
       }
     }
 
-    let result = { entryType: containerTypeCodes.notFound }
+    let result
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
@@ -1704,64 +1777,66 @@ class NfsContainer extends SafeContainer {
           entryType: containerTypeCodes.nfsContainer
         }
         debug('%s is type: %s', itemPath, result.entryType)
-        return this._saveResultForPath(itemPath, fileOperation, result)
       }
 
-      let type
-      let fileState
-      if (fd) {
-        fileState = await this._files.getCachedFileState(itemPath, fd)
-      } else {
-        fileState = await this._files.getOrFetchFileState(itemPath)
-      }
+      if (!result) {
+        let type
+        let fileState
+        if (fd) {
+          fileState = await this._files.getCachedFileState(itemPath, fd)
+        } else {
+          fileState = await this._files.getOrFetchFileState(itemPath)
+        }
 
-      if (fileState) {
-        type = containerTypeCodes.file
-      } else {
-        type = await this.itemType(itemPath)
-      }
-      if (type === containerTypeCodes.file) {
-        // File (or new file if fileState._fileFetched is undefined)
-        let file = fileState._fileFetched
-        result = {
-          modified: file ? file.modified : now,
-          accessed: now,
-          created: file ? file.created : now,
-          size: file ? await fileState._fileFetched.size() : 0,
-          version: file ? file.version : 0,
-          'isFile': true,
-          entryType: type
+        if (fileState) {
+          type = containerTypeCodes.file
+        } else {
+          type = await this.itemType(itemPath)
         }
-      } else if (type === containerTypeCodes.deletedEntry) {
-        // Deleted entry
-        result = {
-          modified: 0,
-          accessed: 0,
-          created: 0,
-          size: 0,
-          version: -1,
-          'isFile': false,
-          entryType: type
-        }
-      } else {
-        // Fake container
-        // Default values (used as is for containerTypeCodes.nfsContainer)
-        result = {
-          modified: now,
-          accessed: now,
-          created: now,
-          size: 0,
-          version: -1,
-          'isFile': false,
-          entryType: type
+        if (type === containerTypeCodes.file) {
+          // File (or new file if fileState._fileFetched is undefined)
+          let file = fileState._fileFetched
+          result = {
+            modified: file ? file.modified : now,
+            accessed: now,
+            created: file ? file.created : now,
+            size: file ? await fileState._fileFetched.size() : 0,
+            version: file ? file.version : 0,
+            'isFile': true,
+            entryType: type
+          }
+        } else if (type === containerTypeCodes.deletedEntry) {
+          // Deleted entry
+          result = {
+            modified: 0,
+            accessed: 0,
+            created: 0,
+            size: 0,
+            version: -1,
+            'isFile': false,
+            entryType: type
+          }
+        } else {
+          // Fake container
+          // Default values (used as is for containerTypeCodes.nfsContainer)
+          result = {
+            modified: now,
+            accessed: now,
+            created: now,
+            size: 0,
+            version: -1,
+            'isFile': false,
+            entryType: type
+          }
         }
       }
     } catch (e) {
       debug(e.message)
     }
+    if (!result) result = { entryType: containerTypeCodes.notFound }
 
     debug('%s is type: %s', itemPath, result.entryType)
-    return this._saveResultForPath(itemPath, fileOperation, result)
+    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1974,6 +2049,35 @@ class NfsContainer extends SafeContainer {
   }
 
   /**
+   * Truncate a file to size bytes (only implements size === 0)
+   *
+   * @private This function is implemented purely to allow FUSE to open a
+   * file for append, but overwrite it by first truncating its size to zero.
+   * This is needed because POSIX open() only has flags for write, not for
+   * append. But since SAFE NFS lacks file truncate, we can only truncate
+   * to zero which we do be creating a new file with NFS open().
+   *
+   * When opening a SAFE NFS file for write we must 'append', otherwise FUSE
+   * would have now way to append (since it can only open() for write, not
+   * write with append). In turn, the ony way to allow FUSE to be able to open
+   * and overwrite an existing NFS file is to implement truncate at size zero.
+   *
+   * @param  {String}  itemPath
+   * @param  {Number}  fd
+   * @param  {Number}  size
+   * @return {Promise}
+   */
+  async _truncateFile (itemPath, fd, size) {
+    debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
+    try {
+      if (size !== 0) throw new Error('truncateFile() not implemented for size other than zero')
+      return this._files._truncateFile(itemPath, fd, size)
+    } catch (e) {
+      debug(e.message)
+    }
+  }
+
+  /**
    * create an NFS container in _public for a SAFE service
    * @param  {number}  tagType     (optional) SAFE MutableData tagType (defaults to www)
    * @param  {String}  servicePath (optional) Defaults to <public-name>@www
@@ -2029,6 +2133,7 @@ containerClasses._services = ServicesContainer
 
 module.exports.defaultContainerNames = defaultContainerNames
 module.exports.containerTypeCodes = containerTypeCodes
+module.exports.isCacheableResult = isCacheableResult
 module.exports.defaultContainers = defaultContainers
 module.exports.containerClasses = containerClasses
 module.exports.PublicContainer = PublicContainer

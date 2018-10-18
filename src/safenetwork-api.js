@@ -202,8 +202,16 @@
     [ ] test in safenetwork-fuse branch
     [ ] done!
   [ ] adopt: import { CONSTANTS as SAFE_CONSTANTS } from '@maidsafe/safe-node-app'
+  [/] BUG SERIOUS `touch file` updates time but truncates file size to zero
+  [ ] BUG `touch file` updates file modified time but gives I/O error (prob need to implement FUSE utimens()))
   [ ] BUG ls of a public name with one additional character does not generate an error to the user
   [ ] BUG gedit load, edit, save file fails and overwrites leaving empty file (error message: Cannot handle "file:" locations in write mode)
+  [ ] BUG when implementing multiple default containers: _getContainerForKey()
+          uses 'key' on containerMap. This is not unique enough because could
+          have different NFS containers at the same MD key in different parent
+          containers  (e.g. one in _public, one in _documents). So this needs
+          to be based on the full path including parent container name).
+
 OTHER TO THINK ABOUT
   [/] multiple desktop applications writing to the same file via safenetwork-fuse
     - can I fail open() for read, when open, and block open for write() if open at all?
@@ -261,6 +269,9 @@ CONSIDER FOR  V0.2.0
       exists. Otherwise, if there were multiple NfsContainers for the same
       SAFE container, modifications via one NfsContainer would not be
       reflected in the cache of the other.
+      Note: for caching to work, a child container will need a list of
+      parents, and SafeContainer _clearResultForPath() will iterate over
+      them so everywhere that caches info about an itemPath will be cleared.
   [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
   [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
     [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
@@ -3065,6 +3076,8 @@ module.exports = SafenetworkApi
 module.exports.PublicContainer = containers.PublicContainer
 module.exports.ServicesContainer = containers.ServicesContainer
 module.exports.NfsContainer = containers.NfsContainer
+
+module.exports.isCacheableResult = containers.isCacheableResult
 
 // Constants
 module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)

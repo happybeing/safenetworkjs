@@ -196,7 +196,11 @@ class NfsFileState {
       // this._fileOpened = this.isWriteable(nfsFlags) ? await nfs.open() : await nfs.open(this._fileFetched, nfsFlags)
       let opened
       if (this.isWriteable(nfsFlags)) {
-        opened = await nfs.open()
+        if (this._fileFetched) {
+          opened = await nfs.open(this._fileFetched, nfsFlags)
+        } else {
+          opened = await nfs.open()
+        }
         debug('%s opened for write')
       } else {
         let size
@@ -216,6 +220,29 @@ class NfsFileState {
         this._fileDescriptor = allNfsFiles.newDescriptor(this)
         this._flags = nfsFlags
         this._versionOpened = this._fileFetched.version
+        return true
+      }
+    } catch (e) { debug(e) }
+    return false
+  }
+
+  /**
+   * Truncate a file to size bytes (only implemented for size equal to zero)
+   */
+  async _truncate (nfs, size) {
+    try {
+      if (size !== 0) throw new Error('_truncateFile() not implemented for size other than zero')
+
+      let nfsFlags = safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
+      if (this._fileFetched) {
+        if (this._fileOpened) await this._fileOpened.close()
+        this._fileOpened = await nfs.open(this._fileFetched, nfsFlags)
+      }
+      debug('%s truncated by re-opening for overwrite')
+
+      if (this._fileOpened || this.isEmptyOpen) {
+        this._flags = nfsFlags
+        this._versionOpened = this._fileFetched ? this._fileFetched.version : 0
         return true
       }
     } catch (e) { debug(e) }
@@ -397,7 +424,7 @@ class NfsContainerFiles {
     let fileState
     try {
       fileState = this.getFileStateFromPathCache(itemPath)
-      if (fileState && fileState.isOpen()) this.closeFile(itemPath)  // If already open make sure it is closed
+      if (fileState && fileState.isOpen()) await this.closeFile(itemPath)  // If already open make sure it is closed
       if (fileState) debug('fileState: %o', fileState)
 
       if (!fileState) fileState = await this._fetchFileState(itemPath)
@@ -659,7 +686,6 @@ class NfsContainerFiles {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    // return this.writeFileBuf_HACK(itemPath, fd, buf, len)
     debug('%s.writeFileBuf(\'%s\', %s, \'%s\', %s)', this.constructor.name, itemPath, fd, buf.slice(0, len), len)
     let fileState
     try {
@@ -681,24 +707,44 @@ class NfsContainerFiles {
     }
   }
 
-  // TODO remove this code which does whole create/write/close/insert in one shot
-  async writeFileBuf_HACK (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf_HACK(\'%s\', %s, \'%s\', %s)', this.constructor.name, itemPath, fd, buf.slice(0, len), len)
+  /**
+   * Truncate a file to size bytes (only implements size === 0)
+   *
+   * @private This function is implemented purely to allow FUSE to open a
+   * file for append, but overwrite it by first truncating its size to zero.
+   * This is needed because POSIX open() only has flags for write, not for
+   * append. But since SAFE NFS lacks file truncate, we can only truncate
+   * to zero which we do be creating a new file with NFS open().
+   *
+   * When opening a SAFE NFS file for write we must 'append', otherwise FUSE
+   * would have now way to append (since it can only open() for write, not
+   * write with append). In turn, the ony way to allow FUSE to be able to open
+   * and overwrite an existing NFS file is to implement truncate at size zero.
+   *
+   * @param  {String}  itemPath
+   * @param  {Number}  fd
+   * @param  {Number}  size
+   * @return {Promise}
+   */
+  async _truncateFile (itemPath, fd, size) {
+    debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
     let fileState
     try {
-      let file = await this.nfs().open()
-      let content = buf.slice(0, len)
-      await file.write(content)
-      await file.close()
-      let permissions // use defaults
-      await this._safeJs.nfsMutate(this.nfs(), permissions, 'insert',
-        itemPath, file, undefined, undefined)
+      if (size !== 0) throw new Error('truncateFile() not implemented for size other than zero')
+      if (fd !== undefined) {
+        fileState = allNfsFiles.getFileState(fd)
+      }
+      if (!fileState) fileState = this.getFileStateFromPathCache(itemPath)
 
-      return len
+      if (fileState && fileState.isOpen() && fileState.isWriteable()) {
+        // Get state before it is invalidated by fileState.close()
+        await fileState._truncate(this.nfs(), size)
+        return 0  // Success
+      }
     } catch (e) {
+      // close/insert/update failed so invalidate cached state
       if (fileState) this._purgeFileState(fileState)
-      debug(e.message)
-      throw e
+      debug(e)
     }
   }
 
