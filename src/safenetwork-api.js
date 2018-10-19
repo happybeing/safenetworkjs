@@ -141,20 +141,18 @@
         containers. The effect of trying to create a file in a default
         container would be to create an NFS container at the corresponding
         path, and then save the file into the NFS container.
-      [ ] FUSE SafeVfs: mkdir()
+      [/] FUSE SafeVfs: mkdir()
         - no need to check if the directory exists because FUSE won't call this
           if it does. So just create a virtual directory path entry:
             call vfsCache.addDirectory(itemPath)
-      [ ] FUSE SafeVfs: rmdir().
-          Calls vfsCache.removeDirectory(itemPath), and it fails (ie there is no
-          virtual directory), return a unsupported operation (Fuse.OPNOTSUP). The
-          error will happen if the user tries to remove an NFS directory, either
-          in _public or an NFS container, or a directory which is part of a
-          path to a file or container.
-          It would be possible to support rmdir() in _public where the path
-          corresponds to an NFS container, but users will be confused that
-          most such directories can't be removed so I don't think it is
-          worth implementing.
+      [/] FUSE SafeVfs: rmdir().
+          Removes any vfs-cache.js virtual directory, or if that fails because
+          there is no virtual directory, returns unsupported operation
+          (Fuse.OPNOTSUP). This will happen if the user tries to:
+          - remove a directory that doesn't exist (not an ideal error)
+          - remove an implied SAFE container directory (the right error)
+        [ ] later this can be improved by deferring handling to the
+        corresponding container by calling its removeFolder()
       [ ] _public makeFolder()
         - if the path is within _public, creates NFS container there
         - if the path is within an NFS container, it returns an error
@@ -203,7 +201,7 @@
     [ ] done!
   [ ] adopt: import { CONSTANTS as SAFE_CONSTANTS } from '@maidsafe/safe-node-app'
   [/] BUG SERIOUS `touch file` updates time but truncates file size to zero
-  [ ] BUG `touch file` updates file modified time but gives I/O error (prob need to implement FUSE utimens()))
+  [ ] BUG `touch file` updates file modified time but gives Remote I/O error (prob need to implement FUSE utimens()))
   [ ] BUG ls of a public name with one additional character does not generate an error to the user
   [ ] BUG gedit load, edit, save file fails and overwrites leaving empty file (error message: Cannot handle "file:" locations in write mode)
   [ ] BUG when implementing multiple default containers: _getContainerForKey()
@@ -624,6 +622,26 @@ class SafenetworkApi {
     this.immutableData = this._appHandle.immutableData
     this.mutableData = this._appHandle.mutableData
     this.webFetch = this._appHandle.webFetch
+    this.initTests()
+  }
+
+  // Intended mainly for mock, create a container to mess with
+  async initTests () {
+    let testKey = '_public/tests/data1'
+
+    if (process.env.SAFENETWORKJS_TESTS === 'testing') {
+      try {
+        let publicMd = await this.auth.getContainer('_public')
+        if (publicMd && !await this.getMutableDataValueVersion(publicMd, testKey)) {
+          let md = await this.mutableData.newRandomPublic(SN_TAGTYPE_NFS)
+          if (md) {
+            await md.quickSetup({}, 'Test container', 'For SafenetworkJs tests on mock network')
+            let nameAndTag = await md.getNameAndTag()
+            this.setMutableDataValue(publicMd, testKey, nameAndTag.name.buffer, true)
+          }
+        }
+      } catch (e) { debug(e) }
+    }
   }
 
   // For access to SAFE API:
