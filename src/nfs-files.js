@@ -686,7 +686,7 @@ class NfsContainerFiles {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, \'%s\', %s)', this.constructor.name, itemPath, fd, buf.slice(0, len), len)
+    debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
     let fileState
     try {
       fileState = await this.getOrFetchFileState(itemPath, fd)

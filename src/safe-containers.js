@@ -690,7 +690,7 @@ class SafeContainer {
   }
 
   async callFunctionOnItem (itemPath, functionName, p2, p3, p4, p5) {
-    debug('%s.callFunctionOnItem(%s, %s, %s, %s, %s, %s)', this.constructor.name, itemPath, functionName, p2, p3, p4, p5)
+    debug('%s.callFunctionOnItem(%s, %s, p2, p3, p4, p5)', this.constructor.name, itemPath, functionName)
 
     let result
     try {
@@ -1051,7 +1051,7 @@ class SafeContainer {
   // Write up to len bytes into buf (Uint8Array), starting at pos
   // return number of bytes written
   async readFileBuf (itemPath, fd, buf, pos, len) {
-    debug('%s.readFileBuf(\'%s\', %o, buf, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+    debug('%s.readFileBuf(\'%s\', %o, buf, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
       // Default is a container of containers, not files so pass to child container
       return await this.callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
@@ -1104,7 +1104,7 @@ class SafeContainer {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, len)
+    debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
 
     try {
       // Default is a container of containers, not files so pass to child container
@@ -1988,7 +1988,7 @@ class NfsContainer extends SafeContainer {
    * @return {Promise}          Number of bytes read into buf
    */
   async readFileBuf (itemPath, fd, buf, pos, len) {
-    debug('%s.readFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, pos, len)
+    debug('%s.readFileBuf(\'%s\', buf, %s, %s)', this.constructor.name, itemPath, pos, len)
     try {
       return this._files.readFileBuf(itemPath, fd, buf, pos, len)
     } catch (e) {
@@ -2039,7 +2039,7 @@ class NfsContainer extends SafeContainer {
    * @return {Promise}          Number of bytes written to file
    */
   async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, buf, len)
+    debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
 
     try {
       return this._files.writeFileBuf(itemPath, fd, buf, len)
