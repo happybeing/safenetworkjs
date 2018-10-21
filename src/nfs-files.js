@@ -610,7 +610,8 @@ class NfsContainerFiles {
         }
       }
 
-      let size = await fileState._fileFetched.size()
+      // Attempt to read a file that has just been created will give size 0:
+      let size = fileState._fileFetched ? await fileState._fileFetched.size() : 0
       if (pos + len > size) len = size - pos
       if (len > 0 && fileState._fileOpened) {
         let readBuf = await fileState._fileOpened.read(pos, len)
