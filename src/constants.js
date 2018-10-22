@@ -22,6 +22,8 @@ const CONSTANTS = {
   PUBLICNAME_MAXCHARS: 62,
   BADPUBLICNAME_MSG: 'must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters.',
 
+  MD_METADATA_KEY: '_metadata',
+
   ENV: {
     DEV: 'development',
     TEST: 'test',
@@ -101,4 +103,4 @@ const CONSTANTS = {
   }
 }
 
-module.exports.CONSTANTS = CONSTANTS
+module.exports = CONSTANTS
