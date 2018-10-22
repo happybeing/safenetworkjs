@@ -60,7 +60,7 @@ const safeApi = require('@maidsafe/safe-node-app')
 // const safeJsApi = require('safenetworkjs').SafenetworkApi
 // const SafeJs = require('./safenetwork-api').SafenetworkApi
 // const SAFE_ERRORS = require('./safenetwork-api').SAFE_ERRORS
-const CONSTANTS = require('./constants').CONSTANTS
+const CONSTANTS = require('./constants')
 
 const minFileDescriptor = 1
 
