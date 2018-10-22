@@ -117,10 +117,10 @@
     [/] copyFile(src, dest)
     [/] moveFile(src, dest) (rename)
     [/] deleteFile(path)
-    [ ] speed up: getattr() cache?
+    [/] speed up: getattr() cache?
     [ ] Support for Directories/Folders
         DESIGN
-      [ ] implement a way for each NFS Container to call FUSE cache invalidation
+      [/] implement a way for each NFS Container to call FUSE cache invalidation
           functions for each FUSE path at which a path appears. How? Perhaps
           when a SafenetworkJs container is mounted, it is given the cache
           object to be called from relevant functions (ie closeFile, safeFile,
@@ -151,12 +151,12 @@
           (Fuse.OPNOTSUP). This will happen if the user tries to:
           - remove a directory that doesn't exist (not an ideal error)
           - remove an implied SAFE container directory (the right error)
-        [ ] later this can be improved by deferring handling to the
-        corresponding container by calling its removeFolder()
+      [ ] later rmdir() handling can be improved by deferring handling to the
+          corresponding container by calling its removeFolder()
       [ ] _public makeFolder()
         - if the path is within _public, creates NFS container there
         - if the path is within an NFS container, it returns an error
-      [ ] _publc listFolder()
+      [ ] _public listFolder()
         - the above description of _public makeFolder() permits an NFS folder
           to exist at a path that is a parent of another path within a default
           container. For example, the following entries would be permitted
@@ -170,17 +170,11 @@
           above. In that example listFolder('_public/one') would contain 'two'
           from the _public container, plus all of the files and folders in
           the NFS container who's root path is _public/one.
-      [ ] Clearing virtual directory paths
+      [/] Clearing virtual directory paths
         - they are all forgotten at the end of a session = easy
         - on creating a file which resides at the leaf of a virtual directory:
-        [ ] when to call vfsCache.removeDrectory(itemPath):
-        - call it on every successful release() (ie file close). It is only
-          needed for a close() following create(), but since there won't be
-          a virtual directory to release except after create()/release() it is
-          ok to try and clear paths that aren't virtual. The only problem
-          would be clearing one that is still needed, but after release
-          the file must exist, so it won't ever need a virtual directory.
-        [ ] Deleting the last file in a directory:
+        - clear path and subpaths on successful release() (ie file close).
+      [ ] Deleting the last file in a directory:
         - should deleting the last file in directory create a virtual
           directory? Ideally yes, because it will be odd for directories
           to disappear if you delete the last file. It might be tricky
@@ -191,6 +185,11 @@
           call getattr() on the folder at the end of every unlink()
           and see how that works.
     [ ] fileExists(path)
+  [ ] _webMounts of arbitrary public websites
+    -> BRANCH dev-mounturi
+    [/] fixup old services code
+    [ ] modify to mount a RootContainer for _webMounts which automounts URIs give as a filename: _webMounts/service.name
+    [ ] BUG mount not working for single parts URIs (e.g. safe://heaven, safe://hello)
   [ ] cleaner code:
     [ ] migrate to ES6 import etc
     [ ] is it supported by nexe?
@@ -270,7 +269,7 @@ CONSIDER FOR  V0.2.0
       Note: for caching to work, a child container will need a list of
       parents, and SafeContainer _clearResultForPath() will iterate over
       them so everywhere that caches info about an itemPath will be cleared.
-  [ ] TODO replace '_metadata' with SAFE constant when avail (search and replace)
+  [ ] TODO replace CONSTANTS.MD_METADATA_KEY with SAFE constant when avail (search and replace)
   [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
     [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
   [ ] add support for webIds
@@ -407,7 +406,7 @@ let extraDebug = false
  * SafenetworkJs constants, including ones not exposed by safeApi.CONSTANTS
  */
 
-const CONSTANTS = require('./constants').CONSTANTS
+const CONSTANTS = require('./constants')
 
 /**
  * SafenetworkJs error codes (assigned to Error.code)
@@ -417,20 +416,6 @@ const CONSTANTS = require('./constants').CONSTANTS
  */
 const SafenetworkJsErrors = []
 SafenetworkJsErrors.NO_SUCH_ENTRY = CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY // Symbol('Entry not found')
-
-/*
- * What constitutes a valid public name is not specified in the containers
- *  RFC, but the Web Hosting Manager example code specifies:
- *    "Public ID must contain only lowercase alphanumeric characters.
- *    Should container a min of 3 characters and a max of 62 characters."
- *
- * Refs:
- *  https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
- */
-// TODO ideally these would be SAFE API constants:
-const PUBLICNAME_MINCHARS = 3
-const PUBLICNAME_MAXCHARS = 62
-const BADPUBLICNAME_MSG = 'must contain only lowercase alphanumeric characters. Should container a min of 3 characters and a max of 62 characters.'
 
 // TODO get these from the API safeApi.CONSTANTS (see web_hosting_manager/app/safenet_comm/api.js for examples)
 // See https://github.com/maidsafe/safe_app_nodejs/blob/9b3a263cade8315370422400561088495d3ec5d9/src/consts.js#L85-L95
@@ -535,16 +520,12 @@ class SafenetworkApi {
     this._safeContainerOpts = undefined
     this._safeAuthUri = undefined
 
-    // Make SAFE API (DOM or NodeJS available as this.safeApi)
-    this.safeApi = safeApi
+    this.safeApi = safeApi      // Access to SAFE API (DOM or NodeJS)
+    this.safeUtils = safeUtils  // Access to utilities
+
     this._availableServices = new Map() // Map of installed services
     this.initialise()
-
-    // An app can install additional services as needed
-    // TODO update:
-    // this.setServiceImplementation(new SafeServiceWww(this)) // A default service for www (passive)
-    // TODO revive:
-    // this.setServiceImplementation(new SafeServiceLDP(this))
+    this.initialiseServices()
   }
 
   initialise () {
@@ -586,6 +567,41 @@ class SafenetworkApi {
     this.defaultContainerNames = containers.defaultContainerNames
   }
 
+  /**
+   * Enable the SAFE Services API
+   *
+   * There is a default service setup for 'www' so that apps can
+   * access SAFE web services (ie websites) via a ServiceInterface
+   * object.
+   *
+   * An app can install additional services as needed. In addition
+   * the ServiceInterface object, a service can provide handlers for
+   * web operations (such as GET, PUT, POST) which will be routed
+   * to handler methods on the corresponding ServiceInterface implementation.
+   *
+   * An example is included in the form of a Linked Data Platform (LDP)
+   * service (see SafeServiceLDP).
+   *
+   * This is a powerful way of offering standard web services to
+   * applications that use browser fetch().
+   *
+   * So just by using SafenetworkJs, a web application written to access
+   * an LDP server using fetch() will 'just work' with a SAFE website
+   * that has an LDP service setup (for example as 'safe://ldp.happybeing').
+   *
+   * Custom services can be added by implementing your own ServiceInterface
+   * and these will also 'just work' with apps that are designed to access
+   * them via browser fetch(). Note also that is is easy to convert apps
+   * which use XmlHttpRequest and so on to use fetch() instead.
+   *
+   */
+  initialiseServices () {
+    // Enable the standard SAFE www service API
+    this.setServiceImplementation(new SafeServiceWww(this))
+    // TODO revive:
+    // this.setServiceImplementation(new SafeServiceLDP(this))
+  }
+
   /*
   * Local helpers
   */
@@ -622,7 +638,7 @@ class SafenetworkApi {
     this.immutableData = this._appHandle.immutableData
     this.mutableData = this._appHandle.mutableData
     this.webFetch = this._appHandle.webFetch
-    this.initTests()
+//    try { this.initTests() } catch (e) { debug(e) }
   }
 
   // Intended mainly for mock, create a container to mess with
@@ -640,7 +656,7 @@ class SafenetworkApi {
             this.setMutableDataValue(publicMd, testKey, nameAndTag.name.buffer, true)
           }
         }
-      } catch (e) { debug(e) }
+      } catch (e) { debug(e.message) }
     }
   }
 
@@ -925,10 +941,22 @@ class SafenetworkApi {
 
   /**
    * Get an initialised default container instance
-   * @param  {String} containerName Name of a default container (e.g. '_public')
-   * @return {Object}               initialised instance of SafeContainer
+   * @param {Object}  containerRef { safePath: | safeUri: }
+   *                                  safePath: mounted path (either '/' or one of '_publicNames', '_public' etc)
+   *                                  safeUri: full or partial safe uri, [safe://][serviceName.]publicName
+   *                                  Examples for safeUri:
+   *                                    safe://blog.happybeing
+   *                                    safe://happbeing/documents
+   *                                    email.happybeing
+   *                                    happybeing
+   * @return {Object}               initialised instance of a SafeContainer based class
    */
-  async getSafeContainer (containerName) {
+  async getSafeContainer (containerRef) {
+    let containerName = containerRef.safePath
+    let safeUri = containerRef.safeUri
+
+    if (safeUri) return this.getSafeContainerFromUri(safeUri)
+
     let container = this._defaultContainers[containerName]
     if (!container) {
       let ContainerClass = containers.containerClasses[containerName]
@@ -943,6 +971,37 @@ class SafenetworkApi {
     }
 
     return container
+  }
+
+  /**
+   * Get an initialised ServicesContainer instance for the publicName
+   * @param  {String}  safeUri  full or partial safe uri, [safe://][serviceName.]publicName
+   *                             Examples for safeUri:
+   *                                    safe://blog.happybeing
+   *                                    safe://happbeing/documents
+   *                                    email.happybeing
+   *                                    happybeing
+   *
+   * @return {Promise} an initialised container object
+   */
+  async getSafeContainerFromUri (safeUri) {
+    debug('%s.getSafeContainerFromUri(%s)', this.constructor.name, safeUri)
+    try {
+      let container
+      let service = await this.getServiceForUri(safeUri)
+      if (service) {
+        // TODO add a ServiceInterface method to get the appropriate
+        //  SafeContainer based class. For now only allow NfsContainer
+        let containerPath = ''  // URI based NFS container has no SAFE path
+        let parent              // URI based NFS container has no parent
+        container = new NfsContainer(this, service.getServiceValue(), containerPath, parent, false)
+        await container.initialise()
+        container._subTree = safeUtils.itemPathpart(safeUri)  // Optionally mounts a subdirectory of the NFS container
+      } else {
+        throw new Error('failed to get ServiceInterface for %s', safeUri)
+      }
+      return container
+    } catch (e) { debug(e) }
   }
 
   /**
@@ -1004,8 +1063,8 @@ class SafenetworkApi {
   // - if the MD is public, they do nothing
   // - if the MD is private, they encrypt/decrypt using the MD private key
   //
-  // @param mdHandle handle of a mutable data, with permission to 'Read'
-  // @param key the key to read
+  // @param mData a mutable data, with permission to 'Read'
+  // @param key   the key to read
   //
   // @returns [ValueVersion] for the entry or undefined if entry not present
   async getMutableDataValueVersion (mData, key) {
@@ -1100,11 +1159,11 @@ class SafenetworkApi {
       // TODO wrap access to some MDs (eg for _publicNames container) in a getter that is passed permissions
       // TODO checks those permissions, gets the MD, and caches the value, or returns it immediately if not null
       let publicNamesMd = await this.safeApi.getContainer('_publicNames')
-      let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
+      let entries = await publicNamesMd.getEntries()
       let entryKey = this.makePublicNamesEntryKey(publicName)
-      let encryptedKey = await this.mutableData.encryptKey(publicNamesMd, entryKey)
-      let valueVersion = await this.mutableDataEntries.get(entriesHandle, encryptedKey)
-      valueVersion.buf = await this.mutableData.decrypt(publicNamesMd, valueVersion.buf)
+      let encryptedKey = await publicNamesMd.encryptKey(entryKey)
+      let valueVersion = await entries.get(encryptedKey)
+      valueVersion.buf = await publicNamesMd.decrypt(valueVersion.buf)
       return {
         key: entryKey,
         valueVersion: valueVersion
@@ -1225,7 +1284,7 @@ class SafenetworkApi {
       }
 
       // Create the new container
-      let mdHandle = await this.mutableData.newRandomPublic(mdTagType)
+      let md = await this.mutableData.newRandomPublic(mdTagType)
       let entriesHandle = await this.mutableData.newEntries(this.safeApp)
       // TODO review this with Web Hosting Manager (where it creates a new root-www container)
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
@@ -1233,15 +1292,15 @@ class SafenetworkApi {
       let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
       let pmHandle = await this.mutableData.newPermissions(this.safeApp)
       await this.mutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
-      await this.mutableData.put(mdHandle, pmHandle, entriesHandle)
-      let nameAndTag = await this.mutableData.getNameAndTag(mdHandle)
+      await md.put(pmHandle, entriesHandle)
+      let nameAndTag = await md.getNameAndTag()
 
       // TODO BUG subfolder: try with 'posts/rand/', to chase bug in _getFolder() where we have a subfolder
       /*
-      logLdp('DEBUG testing newly created service container, mdHandle: %s', mdHandle)
+      logLdp('DEBUG testing newly created service container, md: %s', md)
       let randText = 'posts/' + Date.now()
       logLdp('DEBUG try insert a random filename', randText)
-      let nfsHandle = await this.mutableData.emulateAs(mdHandle,'NFS')
+      let nfsHandle = await this.mutableData.emulateAs(md,'NFS')
       logLdp('DEBUG 1 - create a file...')
       let nfsFile = await this.storageNfs().create(randText)
       logLdp('DEBUG 2 - insert file nfsFile: %s', nfsFile)
@@ -1252,7 +1311,6 @@ class SafenetworkApi {
       if (defaultMd) {
         // Create an entry in defaultContainer (fails if key exists for this container)
         await this.setMutableDataValue(defaultMd, key, nameAndTag.name.buffer)
-        this.mutableData.free(mdHandle)
       }
 
       return nameAndTag
@@ -1343,39 +1401,37 @@ class SafenetworkApi {
       var enc = new TextDecoder()
       logApi('created services MD with servicesMdName: %s', enc.decode(new Uint8Array(servicesMdName)))
 
-      let servicesEntriesHandle = await this.mutableData.newEntries(this.safeApp)
+      let servicesEntries = await this.mutableData.newEntries(this.safeApp)
 
       // TODO review this with Web Hosting Manager (separate into a make or init servicesMd function)
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
       let pmSet = ['Read', 'Update', 'Insert', 'Delete', 'ManagePermissions']
       let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
-      let pmHandle = await this.mutableData.newPermissions(this.safeApp)
-      await this.mutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
-      await this.mutableData.put(servicesMd, pmHandle, servicesEntriesHandle)
+      let permissions = await this.mutableData.newPermissions(this.safeApp)
+      await permissions.insertPermissionsSet(pubKey, pmSet)
+      await servicesMd.put(permissions, servicesEntries)
 
       // TODO do I also need to set metadata?
       // TODO - see: http://docs.maidsafe.net/beaker-plugin-safe-app/#windowsafemutabledatasetmetadata
       // TODO free stuff!
       // TODO   - pubKey? - ask why no free() functions for cyrpto library handles)
       // TODO   - servicesEntriesHandle (this.mutableData.newEntries doesn't say it should be freed)
-      await this.mutableDataPermissions.free(pmHandle)
 
       // TODO remove (test only):
-      let r = await this.mutableData.getNameAndTag(servicesMd)
+      let r = await servicesMd.getNameAndTag()
       logApi('servicesMd created with tag: ', r.type_tag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
       let publicNamesMd = await this.safeApi.getContainer('_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
-      let entriesHandle = await this.mutableData.getEntries(publicNamesMd)
-      let namesMutation = await this.mutableDataEntries.mutate(entriesHandle)
-      let encryptedKey = await this.mutableData.encryptKey(publicNamesMd, entryKey)
-      let encryptedValue = await this.mutableData.encryptValue(publicNamesMd, servicesMdName)
-      await this.mutableDataMutation.insert(namesMutation, encryptedKey, encryptedValue)
-      await this.mutableData.applyEntriesMutation(publicNamesMd, namesMutation)
-      await this.mutableDataMutation.free(namesMutation)
+      let entries = await publicNamesMd.getEntries()
+      let namesMutation = await entries.mutate()
+      let encryptedKey = await publicNamesMd.encryptKey(entryKey)
+      let encryptedValue = await publicNamesMd.encryptValue(servicesMdName)
+      await namesMutation.insert(encryptedKey, encryptedValue)
+      await publicNamesMd.applyEntriesMutation(namesMutation)
 
       // TODO remove (test only):
-      r = await this.mutableData.getNameAndTag(servicesMd)
+      r = await servicesMd.getNameAndTag()
       /* logApi('DEBUG new servicesMd created with tag: ', r.type_tag, ' and name: ', r.name)
       logApi('DEBUG _publicNames entry created for %s', publicName)
       logApi('DEBUG servicesMd for public name \'%s\' contains...', publicName)
@@ -1405,16 +1461,16 @@ class SafenetworkApi {
   // This method is really just to help clarify the SAFE API, so you could
   // just do what this does in your code.
   //
-  // @param mdHandle the handle of a Mutable Data object
+  // @param md the handle of a Mutable Data object
   //
   // @returns a promise which resolves true if the Mutable Data exists
-  async mutableDataExists (mdHandle) {
+  async mutableDataExists (md) {
     try {
-      await this.mutableData.getVersion(mdHandle)
-      logApi('mutableDataExists(%s) TRUE', mdHandle)
+      await md.getVersion(md)
+      logApi('mutableDataExists(%s) TRUE', md)
       return true
     } catch (err) {
-      logApi('mutableDataExists(%s) FALSE', mdHandle)
+      logApi('mutableDataExists(%s) FALSE', md)
       return false  // Error indicates this MD doens't exist on the network
     }
   }
@@ -1448,11 +1504,11 @@ class SafenetworkApi {
 
       logApi("host '%s' has publicName '%s'", host, publicName)
       let servicesName = await this.makeServicesMdName(publicName)
-      let mdHandle = await this.mutableData.newPublic(servicesName, SN_TAGTYPE_SERVICES)
-      if (await this.mutableDataExists(mdHandle)) {
+      let md = await this.mutableData.newPublic(servicesName, SN_TAGTYPE_SERVICES)
+      if (await this.mutableDataExists(md)) {
         var enc = new TextDecoder()
         logApi('Look up SUCCESS for MD XOR name: ' + enc.decode(new Uint8Array(servicesName)))
-        return mdHandle
+        return md
       }
       throw new Error("services Mutable Data not found for public name '" + publicName + "'")
     } catch (err) {
@@ -1482,10 +1538,10 @@ class SafenetworkApi {
       logApi("host '%s' has publicName '%s'", host, publicName)
 
       let nameKey = this.makePublicNamesEntryKey(publicName)
-      let mdHandle = await this.safeApi.getContainer('_publicNames')
+      let md = await this.safeApi.getContainer('_publicNames')
       logApi('_publicNames ----------- start ----------------')
-      let entriesHandle = await this.mutableData.getEntries(mdHandle)
-      await this.mutableDataEntries.forEach(entriesHandle, (k, v) => {
+      let entries = await md.getEntries()
+      await entries.forEach((k, v) => {
         logApi('Key: ', k.toString())
         logApi('Value: ', v.buf.toString())
         logApi('Version: ', v.version)
@@ -1589,19 +1645,29 @@ class SafenetworkApi {
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
-      let entriesHandle = await this.mutableData.getEntries(servicesMd)
+      let entries = await servicesMd.getEntries()
       logApi("checking servicesMd entries for host '%s'", host)
       this.hostedService = null
-      await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
+      await entries.forEach(async (k, v) => {
         logApi('Key: ', k.toString())
         logApi('Value: ', v.buf.toString())
         logApi('Version: ', v.version)
         let serviceKey = k.toString()
-        let serviceProfile = serviceKey.split('@')[0]
-        let serviceId = serviceKey.split('@')[1]
-        if (serviceId === undefined) {
-          serviceId = serviceKey
-          serviceProfile = ''
+        if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+          logApi('Skipping metadata entry: ', serviceKey)
+          return
+        }
+
+        // Defaults:
+        let serviceProfile = ''
+        let serviceId = 'www'
+
+        if (serviceKey.indexOf('@' === -1)) {
+          serviceProfile = serviceKey
+        } else {
+          serviceProfile = serviceKey.split('@')[0]
+          serviceId = serviceKey.split('@')[1]
+          if (!serviceId || serviceId === '') serviceId = 'www'
         }
 
         let serviceValue = v
@@ -1615,7 +1681,7 @@ class SafenetworkApi {
             logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
             this.hostedService = newHostedService
           } else {
-            let errMsg = "WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available"
+            logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
           }
         }
       })
@@ -1924,19 +1990,19 @@ class SafenetworkApi {
   async listContainer (containerName) {
     logTest('listContainer(%s)...', containerName)
     logTest(containerName + ' ----------- start ----------------')
-    let mdHandle = await this.safeApi.getContainer(containerName)
-    await this.listMd(mdHandle, containerName)
+    let md = await this.safeApi.getContainer(containerName)
+    await this.listMd(md, containerName)
     logTest(containerName + '------------ end -----------------')
   }
 
-  async listMd (mdHandle, name) {
-    let entriesHandle = await this.mutableData.getEntries(mdHandle)
-    logTest('list mdHandle: %s', mdHandle)
-    await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
+  async listMd (md, name) {
+    let entries = await md.getEntries()
+    logTest('list md: %s', md)
+    await entries.forEach(async (k, v) => {
       let plainKey = k
-      try { plainKey = await this.mutableData.decrypt(mdHandle, k) } catch (e) { debug('Key decryption ERROR: %s', e) }
+      try { plainKey = await md.decrypt(k) } catch (e) { debug('Key decryption ERROR: %s', e) }
       let plainValue = v.buf
-      try { plainValue = await this.mutableData.decrypt(mdHandle, v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
+      try { plainValue = await md.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
       let enc = new TextDecoder()
 
       plainKey = enc.decode(new Uint8Array(plainKey))
@@ -2125,15 +2191,12 @@ class SafeServiceWww extends ServiceInterface {
   //
   // @returns a promise which resolves to a new instance of this service for the given host
   async makeServiceInstance (host, serviceValue) {
-    logApi('%s.makeServiceInstance(%s,%s) - NOT YET IMPLEMENTED', this.constructor.name, host, serviceValue)
-    throw ('%s.makeServiceInstance() not implemented for ' + this.getName() + ' service', this.constructor.name)
-    /* Example:
+    logLdp('%s.makeServiceInstance(%s,%s)', this.constructor.name, host, serviceValue)
     let hostService = await new this.constructor(this.safeWeb())
     hostService._host = host
     hostService._serviceConfig = this.getServiceConfig()
     hostService._serviceValue = serviceValue
     return hostService
-    */
   }
 
   // Handle web style operations for this service in the manner of browser window.fetch()
@@ -2346,7 +2409,7 @@ class SafeServiceLDP extends ServiceInterface {
       // The service value is the address of the storage container (Mutable Data)
       this._storageMd = await this.mutableData.newPublic(this.getServiceValue().buf, this.getTagType())
       // TODO remove this existence check:
-      await this.mutableData.getVersion(this._storageMd)
+      await this._storageMd.getVersion()
 
       logLdp('storageMd() - set: %s', this._storageMd)
       return this._storageMd
@@ -2750,9 +2813,9 @@ const ns = require('solid-namespace')($rdf)
       debug('safe:TMP')('1')
       // Create listing by enumerating container keys beginning with docPath
       const directoryEntries = []
-      let entriesHandle = await this.mutableData.getEntries(await this.storageMd())
+      let entries = await (await this.storageMd()).getEntries()
       debug('safe:TMP')('2')
-      await this.mutableDataEntries.forEach(entriesHandle, async (k, v) => {
+      await entries.forEach(async (k, v) => {
         debug('safe:TMP')('3')
         // Skip deleted entries
         if (v.buf.length === 0) {
@@ -3039,7 +3102,7 @@ const ns = require('solid-namespace')($rdf)
 
       // Folders //
       let smd = await this.storageMd()
-      let containerVersion = await this.mutableData.getVersion(smd)
+      let containerVersion = await smd.getVersion()
       if (docPath === '/') {
         return { path: docPath, ETag: containerVersion.toString() }
       } // Dummy fileInfo to stop at "root"
@@ -3096,6 +3159,7 @@ module.exports.ServicesContainer = containers.ServicesContainer
 module.exports.NfsContainer = containers.NfsContainer
 
 module.exports.isCacheableResult = containers.isCacheableResult
+module.exports.safeUtils = safeUtils
 
 // Constants
 module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
