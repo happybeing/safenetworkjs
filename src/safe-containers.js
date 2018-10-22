@@ -15,6 +15,7 @@ const path = require('path')
 const u = require('./safenetwork-utils')
 const SafeJs = require('./safenetwork-api')
 const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
+const CONSTANTS = require('./constants')
 
 // TODO remove this
 const fakeReadDir = {
@@ -194,7 +195,7 @@ class SafeContainer {
           if (this._mData) this._entryValueVersion = valueVersion
         }
       } else {
-        this._mData = await this._initialiseFromXorName(this._name, this._tagType)
+        this._mData = await this._initialiseFromXorName(this._name.buf, this._tagType)
       }
 
       if (this._mData) await this.initialiseNfs()
@@ -212,7 +213,8 @@ class SafeContainer {
     if (tagType === undefined) tagType = this._tagType
     try {
       if (tagType === undefined) throw new Error(this.constructor.name + '._initialiseFromXorName() - tagType not defined')
-      return this._safeJs.getMdFromHash(xorName, tagType)
+      this._name = xorName
+      return this._safeJs.getMdFromHash(this._name, tagType)
     } catch (e) { debug(e.message) }
   }
 
@@ -238,7 +240,7 @@ class SafeContainer {
   isValidKey (key) { return true }          // Containers should sanity check keys in case of corruption
                                             // but still cope with a valid key that has an invalid value
   isHiddenEntry (key) {
-    return key === '_metadata' || // Containers for which this is not hidden should override
+    return key === CONSTANTS.MD_METADATA_KEY || // Containers for which this is not hidden should override
            !this.isValidKey(key)
   }
 
@@ -595,7 +597,7 @@ class SafeContainer {
       return listing
     } catch (e) {
       debug(e.message)
-      debug('ERROR %s.listFolder(\'%s\') failed')
+      debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
     debug('%s.listing-5-END: %o', constructor.name, listing)
@@ -682,7 +684,7 @@ class SafeContainer {
       return listing
     } catch (e) {
       debug(e.message)
-      debug('ERROR %s.listFolder(\'%s\') failed')
+      debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
     debug('%s.listing-5-END: %o', constructor.name, listing)
@@ -1195,6 +1197,7 @@ class SafeContainer {
       this._resultHolderMap[itemPath] = resultHolder
     }
 
+    cacheTheResult = cacheTheResult && process.env.SAFENETWORKJS_CACHE !== 'disable'
     if (cacheTheResult) {
       resultHolder[fileOperation] = operationResult
     } else {
