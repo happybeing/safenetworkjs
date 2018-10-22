@@ -30,8 +30,8 @@ const itemPathpart = function (uri) {
   return docpart(uri.slice(hostlen))
 }
 
-const hostpart = function (u) {
-  var m = /[^\/]*\/\/([^\/]*)\//.exec(u)
+const hostpart = function (uri) {
+  var m = /[^\/]*\/\/([^\/]*).*/.exec(uri)
   if (m) {
     return m[1]
   } else {
