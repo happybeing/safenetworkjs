@@ -1497,11 +1497,13 @@ class ServicesContainer extends SafeContainer {
     debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
 
+    let type
     let result
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
-        debug('%s is type: %s', itemPath, containerTypeCodes.servicesContainer)
+        type = containerTypeCodes.servicesContainer
+        debug('%s is type: %s', itemPath, type)
         await this.updateMetadata()
         result = {
           // TODO improve this if SAFE accounts ever have suitable values for size etc:
@@ -1511,11 +1513,10 @@ class ServicesContainer extends SafeContainer {
           size: this._metadata.size,
           version: this._metadata.version,
           'isFile': false,
-          entryType: containerTypeCodes.servicesContainer
+          entryType: type
         }
       }
 
-      let type
       if (!result) {
         type = containerTypeCodes.service
         let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
@@ -1526,17 +1527,20 @@ class ServicesContainer extends SafeContainer {
         }
       }
 
-      // Service without its own container (or unkown service)
-      debug('%s is type: %s', itemPath, type)
-      // Default values (used as is for containerTypeCodes.nfsContainer)
-      result = {
-        modified: now,
-        accessed: now,
-        created: now,
-        size: 0,
-        version: -1,
-        'isFile': true,
-        entryType: containerTypeCodes.service
+      if (!result) {
+        // Default values (used as is for containerTypeCodes.nfsContainer)
+        type = containerTypeCodes.service
+        // Service without its own container (or unkown service)
+        debug('%s is type: %s', itemPath, type)
+        result = {
+          modified: now,
+          accessed: now,
+          created: now,
+          size: 0,
+          version: -1,
+          'isFile': true,
+          entryType: type
+        }
       }
     } catch (e) {
       debug(e.message)
