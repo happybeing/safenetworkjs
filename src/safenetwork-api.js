@@ -952,6 +952,7 @@ class SafenetworkApi {
    * @return {Object}               initialised instance of a SafeContainer based class
    */
   async getSafeContainer (containerRef) {
+    debug('%s.getSafeContainer(\'%o\')', this.constructor.name, containerRef)
     let containerName = containerRef.safePath
     let safeUri = containerRef.safeUri
 
@@ -1639,7 +1640,7 @@ class SafenetworkApi {
       let publicName = host.split('.')[1]
       if (publicName === undefined) {
         publicName = host
-        uriProfile = ''
+        uriProfile = 'www'
       }
       logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
 
