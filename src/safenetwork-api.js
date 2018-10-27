@@ -188,8 +188,9 @@
   [ ] _webMounts of arbitrary public websites
     -> BRANCH dev-mounturi
     [/] fixup old services code
-    [ ] modify to mount a RootContainer for _webMounts which automounts URIs give as a filename: _webMounts/service.name
-    [ ] BUG mount not working for single parts URIs (e.g. safe://heaven, safe://hello)
+    [/] modify RootHandler to automount URIs give as a filename: _webMounts/service.name
+    [/] BUG mount not working for single parts URIs (e.g. safe://heaven, safe://hello)
+  [ ] feature: SAFE Drive operation without SAFE a/c login for browsing public files
   [ ] cleaner code:
     [ ] migrate to ES6 import etc
     [ ] is it supported by nexe?
