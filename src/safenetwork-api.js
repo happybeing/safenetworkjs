@@ -894,7 +894,7 @@ class SafenetworkApi {
   * @return {Promise}             undefined, or a new session object with additional permissions
   */
   async nfsMutate (nfs, permissions, operation, fileName, file, version, newMetadata) {
-    let perms = permissions | ['Read', 'Insert', 'Update', 'Delete']
+    let perms = permissions !== undefined ? permissions : ['Read', 'Insert', 'Update', 'Delete']
     try {
       await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
     } catch (e) {

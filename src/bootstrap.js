@@ -58,6 +58,7 @@ debug = function (d) {
 
 // Request permissions on a shared MD
 Safe.fromUri = async (app, uri) => {
+  debug("fromUri(app, %s)", uri)
   await app.auth.openUri(uri)
 
   const uri2 = await ipcReceive(String(process.pid))
