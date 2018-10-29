@@ -14,6 +14,7 @@
   "url": "git+https://github.com/theWebalyst/safenetworkjs.git",
   "dependencies": {
     "@maidsafe/safe-node-app": "^0.8.1",
+    "debug": "^4.1.0",
     "fast-text-encoding": "^1.0.0",
     "node-ipc": "^9.1.1",
     "path": "^0.12.7",
