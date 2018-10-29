@@ -1160,9 +1160,9 @@ class SafeContainer {
   }
 
   _clearCacheForDelete (itemPath) {
-    this.clearResultForPath(itemPath)
+    this._clearResultForPath(itemPath)
     let base = u.itemPathBasename(itemPath)
-    if (base !== itemPath) this._clearResultForDelete(base) // Recurse to clear all parent folders
+    if (base !== itemPath) this._clearCacheForDelete(base) // Recurse to clear all parent folders
   }
 
   _clearResultForPath (itemPath) {
