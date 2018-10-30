@@ -639,7 +639,7 @@ class SafenetworkApi {
     this.immutableData = this._appHandle.immutableData
     this.mutableData = this._appHandle.mutableData
     this.webFetch = this._appHandle.webFetch
-//    try { this.initTests() } catch (e) { debug(e) }
+    try { this.initTests() } catch (e) { debug(e) }
   }
 
   // Intended mainly for mock, create a container to mess with

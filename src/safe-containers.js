@@ -180,14 +180,17 @@ class SafeContainer {
    * @return {Promise} the MutableData for this container
    */
   async initialise () {
+    debug('%s.initialise() for container _name: %s at _containerPath: %s', this.constructor.name, this._name, this._containerPath)
     try {
       if (this._mData) return this._mData
 
       if (this.isDefaultContainer()) {
-        // TODO check we have th desired permissions and if not request them
+        // TODO check we have the desired permissions and if not request them
+        debug('auth.getContainer(%s)', this._name)
         this._mData = await this._safeJs.auth.getContainer(this._name)
       } else if (this._parent && this._parentEntryKey) {
         // Get xor address from parent entry
+        debug('getting xor address from parent entry key: %s', this._parentEntryKey)
         let valueVersion = await this._parent.getValueVersion(this._parentEntryKey)
         if (!this._entryValueVersion || this._entryValueVersion.version !== valueVersion.version) {
           // Invalidated or not yet initialised
@@ -210,6 +213,7 @@ class SafeContainer {
   }
 
   async _initialiseFromXorName (xorName, tagType) {
+    debug('%s._initialiseFromXorName(%s, %s)', xorName, tagType)
     if (tagType === undefined) tagType = this._tagType
     try {
       if (tagType === undefined) throw new Error(this.constructor.name + '._initialiseFromXorName() - tagType not defined')
@@ -244,15 +248,15 @@ class SafeContainer {
            !this.isValidKey(key)
   }
 
-  isDeletedEntry (entry) {
-    return entry.value.buf.byteLength === 0
+  isDeletedEntryValue (entryValue) {
+    return entryValue.buf.byteLength === 0
   }
 
   // Check if key exists and is not deleted
   async isActiveKey (itemPath) {
     try {
-      let entry = await this._mData.get(itemPath)
-      if (!entry || this.isDeletedEntry(entry)) return false
+      let entryValue = await this._mData.get(itemPath)
+      if (!entryValue || this.isDeletedEntryValue(entryValue)) return false
       return true
     } catch (e) {
       debug(e)
@@ -549,7 +553,7 @@ class SafeContainer {
       // TODO remove safe-node-app v0.8.1 code:
       let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
-        if (!this.isDeletedEntry(entry)) {
+        if (!this.isDeletedEntryValue(entry.value)) {
           listingQ.push(new Promise(async (resolve, reject) => {
             let decodedEntry = await this._decodeEntry(entry)
             let plainKey = decodedEntry.plainKey
@@ -720,7 +724,7 @@ class SafeContainer {
       let entriesList = await this._listEntriesHack(entries)
       let entryQ = []
       entriesList.forEach(async (entry) => {
-        if (!this.isDeletedEntry(entry)) {
+        if (!this.isDeletedEntryValue(entry.value)) {
           entryQ.push(new Promise(async (resolve, reject) => {
             if (!result) {
               let decodedEntry = await this._decodeEntry(entry)
@@ -865,7 +869,7 @@ class SafeContainer {
       // TODO remove safe-node-app v0.8.1 code:
       let entriesList = await this._listEntriesHack(entries)
       entriesList.forEach(async (entry) => {
-        if (!this.isDeletedEntry(entry)) {
+        if (!this.isDeletedEntryValue(entry.value)) {
           resultQ.push(new Promise(async (resolve, reject) => {
             let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
             let plainKey = decodedEntry.plainKey
@@ -954,7 +958,7 @@ class SafeContainer {
             'isFile': false,
             entryType: type
           }
-        } else if (type === containerTypeCodes.notFound) {
+        } else {
           result = { entryType: type }
         }
       }
@@ -1191,6 +1195,7 @@ class SafeContainer {
    * @return {Object} A 'resultsRef' which has the result, its cache location
    */
   _updateResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
+    debug('%s._updateResultForPath(%s, %s, %o, %o)', this.constructor.name, itemPath, fileOperation, operationResult, cacheTheResult)
     let resultHolder = this._resultHolderMap[itemPath]
     if (!resultHolder) {
       resultHolder = {}
@@ -1896,7 +1901,7 @@ class NfsContainer extends SafeContainer {
   //
   // POSIX Ref: http://pubs.opengroup.org/onlinepubs/9699919799/
   async renameFile (itemPath, newItemPath, newFullPath) {
-    debug('%s.renameFile(\'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
+    debug('%s.renameFile(\'%s\', \'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
 
     try {
       // Don't allow renaming directories because it can use up a lot of entries fast
