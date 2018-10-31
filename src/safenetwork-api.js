@@ -863,9 +863,10 @@ class SafenetworkApi {
   * @param  {String}  operation 'insert', 'update' or 'delete'
   * @param  {String}  key
   * @param  {String}  value
-  * @return {Promise}
+  * @return {Promise}           true on success
   */
   async nfsRawMutate (nfs, operation, fileName, file, version, newMetadata) {
+    let result
     try {
       if (operation === 'update') {
         await nfs.update(fileName, file, version, newMetadata)
@@ -876,10 +877,11 @@ class SafenetworkApi {
       } else {
         throw new Error('unknown NFS operation: ' + operation)
       }
+      result = true
     } catch (e) {
       debug(e)
-      throw e
     }
+    return result
   }
 
  /**
@@ -891,12 +893,13 @@ class SafenetworkApi {
   * @param  {File}    file        NFS File (use undefined for 'delete')
   * @param  {File}    version     new version of entry (use undefined for 'insert')
   * @param  {String}  newMetadata metadata to be set (use undefined for 'delete')
-  * @return {Promise}             undefined, or a new session object with additional permissions
+  * @return {Promise}             true on success
   */
   async nfsMutate (nfs, permissions, operation, fileName, file, version, newMetadata) {
     let perms = permissions !== undefined ? permissions : ['Read', 'Insert', 'Update', 'Delete']
+    let result
     try {
-      await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
+      result = this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
     } catch (e) {
       if (e.code === CONSTANTS.ERROR_CODE.ACCESS_DENIED) {
         try {
@@ -908,7 +911,7 @@ class SafenetworkApi {
           }]
           const uri = await this.auth.genShareMDataUri(mdPermissions)
           await this.safeApi.fromUri(this.safeApp, uri)
-          await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
+          result = this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
         } catch (e) {
           throw e
         }
@@ -917,6 +920,7 @@ class SafenetworkApi {
         debug(e)
       }
     }
+    return result
   }
 
   /* --------------------------
