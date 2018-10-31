@@ -371,10 +371,13 @@ class NfsContainerFiles {
    * @param  {String}  sourcePath
    * @param  {String}  destinationPath
    * @param  {Boolean} copyMetadata    [optional] if true, copies all file metadata (so like 'move')
-   * @return {Promise}                 [description]
+   * @return {Promise}                 true on success
+   * TODO perhaps this function should return error codes e.g. file not found
+   *      but for now it returns true on success, undefined on failure
    */
   async copyFile (sourcePath, destinationPath, copyMetadata) {
     debug('%s.copyFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath, copyMetadata)
+    let result
     try {
       let srcFileState = await this.getOrFetchFileState(sourcePath)
       if (!srcFileState) throw new Error('copyFile error - source file not found:', sourcePath)
@@ -387,18 +390,18 @@ class NfsContainerFiles {
       let destFileState = await this.getOrFetchFileState(destinationPath)
       if (!destFileState) {
         // Destination is a new file, so insert
-        await this._safeJs.nfsMutate(this.nfs(), perms, 'insert', destinationPath, srcFileState._fileFetched)
+        result = await this._safeJs.nfsMutate(this.nfs(), perms, 'insert', destinationPath, srcFileState._fileFetched)
       } else {
         // Destination exists, so update
-        await this._safeJs.nfsMutate(this.nfs(), perms, 'update', destinationPath, srcFileState._fileFetched, destFileState.version() + 1)
-        await this._purgeFileState(destFileState) // New file so purge the cache
+        result = await this._safeJs.nfsMutate(this.nfs(), perms, 'update', destinationPath, srcFileState._fileFetched, destFileState.version() + 1)
+        this._purgeFileState(destFileState) // New file so purge the cache
       }
       // After using the fetched file to update another entry, it takes on the version of the other, so needs refreshing
-      await this._purgeFileState(srcFileState)
+      this._purgeFileState(srcFileState)
     } catch (e) {
       debug(e)
-      throw e
     }
+    return result
   }
 
   /**
@@ -406,19 +409,32 @@ class NfsContainerFiles {
    *
    * @param  {String}  sourcePath
    * @param  {String}  destinationPath
-   * @return {Promise}
+   * @return {Promise}  true on success
+   * TODO perhaps this function should return error codes e.g. file not found
+   *      but for now it returns true on success, undefined on failure
    */
   async moveFile (sourcePath, destinationPath) {
     debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath)
     try {
-      await this.copyFile(sourcePath, destinationPath, true)
-      await this.deleteFile(sourcePath)
+      if (await this.copyFile(sourcePath, destinationPath, true) &&
+          await this.deleteFile(sourcePath)) {
+        debug('moveFile() succeeded')
+        return true
+      } else {
+        throw new Error('moveFile() failed')
+      }
     } catch (e) {
       debug(e)
-      throw e
     }
   }
 
+  /**
+   * Open a file
+   * @param  {String}  itemPath
+   * @param  {Number}  nfsFlags SAFE NFS API open() flags
+   * @return {Promise}      an integer file descriptor on success
+   * TODO perhaps this function should return error codes on failure?
+   */
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     let fileState
@@ -441,10 +457,15 @@ class NfsContainerFiles {
     } catch (e) {
       if (fileState) fileState.releaseDescriptor() // open() failed
       debug(e.message)
-      throw e
     }
   }
 
+  /**
+   * Create a file
+   * @param  {String}  itemPath
+   * @return {Promise}      an integer file descriptor on success
+   * TODO perhaps this function should return error codes on failure?
+   */
   async createFile (itemPath) {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     let fileState
@@ -469,9 +490,16 @@ class NfsContainerFiles {
     }
   }
 
+  /**
+   * Delete file
+   * @param  {String}  itemPath
+   * @return {Promise}         true on success
+   * TODO perhaps this function should return error codes on failure?
+   */
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     let fileState
+    let result
     try {
       fileState = await this.getOrFetchFileState(itemPath)
 
@@ -484,18 +512,23 @@ class NfsContainerFiles {
         // operations on it will fail.
 
         let permissions // use defaults
-        await this._safeJs.nfsMutate(this.nfs(), permissions, 'delete',
+        result = await this._safeJs.nfsMutate(this.nfs(), permissions, 'delete',
           itemPath, undefined, fileState.version() + 1)
         this._purgeFileState(fileState) // File no longer exists so purge cache
-        debug('file deleted: ', itemPath)
+        if (result) {
+          debug('file deleted: ', itemPath)
+        } else {
+          throw new Error('file delete failed for: ', itemPath)
+        }
       } else {
         throw new Error('file not found: ', itemPath)
       }
     } catch (e) {
       if (fileState) this._purgeFileState(fileState) // Invalidate cached state
       debug(e.message)
-      throw new Error('deleteFile() failed on: ' + itemPath)
+      debug('deleteFile() failed on: ' + itemPath)
     }
+    return result
   }
 
   /**
@@ -503,6 +536,7 @@ class NfsContainerFiles {
    * @param  {String} itemPath
    * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
    * @return {Promise}         A buffer containing any metadata as previously set
+   * TODO perhaps this function should return error codes on failure?
    */
   async getFileMetadata (itemPath, fd) {
     let fileState
@@ -519,6 +553,7 @@ class NfsContainerFiles {
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor
    * @param  {Buffer}  metadata Metadata that will be written on closeFile()
+   * TODO perhaps this function should return error codes on failure?
    */
   setFileMetadata (itemPath, fd, metadata) {
     try {
@@ -543,6 +578,7 @@ class NfsContainerFiles {
    * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
    * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
    * @return {Promise}          String container bytes read
+   * TODO perhaps this function should return error codes on failure?
    */
   async readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
@@ -593,6 +629,7 @@ class NfsContainerFiles {
    * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
    * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
    * @return {Promise}          Number of bytes read into buf
+   * TODO perhaps this function should return error codes on failure?
    */
   async readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', %s, buf, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
@@ -644,7 +681,8 @@ class NfsContainerFiles {
    * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          String container bytes read
+   * @return {Promise}          the number of bytes written
+   * TODO perhaps this function should return error codes on failure?
    */
   async writeFile (itemPath, fd, content) {
     debug('%s.writeFile(\'%s\', %s, \'%s\')', this.constructor.name, itemPath, fd, content)
@@ -685,6 +723,7 @@ class NfsContainerFiles {
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
    * @return {Promise}          Number of bytes written to file
+   * TODO perhaps this function should return error codes on failure?
    */
   async writeFileBuf (itemPath, fd, buf, len) {
     debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
@@ -725,7 +764,8 @@ class NfsContainerFiles {
    * @param  {String}  itemPath
    * @param  {Number}  fd
    * @param  {Number}  size
-   * @return {Promise}
+   * @return {Promise}  zero on success
+   * TODO perhaps this function should return error codes on failure?
    */
   async _truncateFile (itemPath, fd, size) {
     debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
@@ -749,10 +789,17 @@ class NfsContainerFiles {
     }
   }
 
-  // TODO review error returns
+  /**
+   * Close file and save to network
+   * @param  {String}  itemPath
+   * @param  {Number}  fd
+   * @return {Promise}          true on success
+   * TODO perhaps this function should return error codes on failure?
+   */
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileState
+    let result
     try {
       if (fd !== undefined) {
         fileState = allNfsFiles.getFileState(fd)
@@ -767,7 +814,7 @@ class NfsContainerFiles {
         if (isWriteable) {
           let permissions // use defaults
           debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
-          await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),
+          result = await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),
             fileState._itemPath, fileState._fileOpened, version + 1, fileState._newMetadata)
         }
         this._purgeFileState(fileState) // Invalidate cached state after closeFile()
@@ -779,6 +826,7 @@ class NfsContainerFiles {
       if (fileState) this._purgeFileState(fileState)
       debug(e)
     }
+    return result
   }
 }
 
