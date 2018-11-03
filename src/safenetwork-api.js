@@ -384,7 +384,7 @@ require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 // Local
 const containers = require('./safe-containers')
 const NfsContainer = containers.NfsContainer
-
+const isCacheableResult = containers.isCacheableResult
 // Libs
 const safeUtils = require('./safenetwork-utils')
 
@@ -476,7 +476,6 @@ const untrustedAppConfig = {
   vendor: 'Untrusted'
 }
 
-
 // Default permissions to request. Optional parameter to SafenetworkApi.simpleAuthorise()
 //
 
@@ -564,6 +563,7 @@ class SafenetworkApi {
     /*
     * Access to helpers and constants via the object (useful when <script> including this JS)
     */
+    this.isCacheableResult = isCacheableResult
     this.isFolder = isFolder
     this.docpart = docpart
     this.pathpart = pathpart
@@ -1027,17 +1027,18 @@ class SafenetworkApi {
    * @param  {boolean}  createNew access (false) or create (true) services MutableData
    * @return {Object}            initialised instance of ServicesContainer
    */
-  async getServicesContainer (publicName, createNew) {
-    let container = this._servicesContainers[publicName]
-    if (!container) {
-      container = new ServicesContainer(this, publicName)
-      container.intitialise(createNew).then(() => {
-        this._servicesContainers[publicName] = container
-      }).catch((e) => { debug(e.message); throw e })
-    }
-
-    return container
-  }
+  // TODO might be better for people to use "new NfsContainer" so comment out for now
+  // async getServicesContainer (publicName, createNew) {
+  //   let container = this._servicesContainers[publicName]
+  //   if (!container) {
+  //     container = new ServicesContainer(this, publicName)
+  //     container.intitialise(createNew).then(() => {
+  //       this._servicesContainers[publicName] = container
+  //     }).catch((e) => { debug(e.message); throw e })
+  //   }
+  //
+  //   return container
+  // }
 
   /**
    * Get an initialised NfsContainer instance
@@ -2990,7 +2991,7 @@ const ns = require('solid-namespace')($rdf)
             typeStatement.object.uri !== ns.ldp('BasicContainer').uri &&
             typeStatement.object.uri !== ns.ldp('Container').uri
           ) ||
-          safeUtils.isFolder(docUri)
+          isFolder(docUri)
         ) {
           resourceGraph.add(resourceGraph.sym(docUri),
           typeStatement.predicate,
@@ -3174,7 +3175,6 @@ module.exports = SafenetworkApi
 module.exports.PublicContainer = containers.PublicContainer
 module.exports.ServicesContainer = containers.ServicesContainer
 module.exports.NfsContainer = containers.NfsContainer
-
 module.exports.isCacheableResult = containers.isCacheableResult
 module.exports.safeUtils = safeUtils
 
