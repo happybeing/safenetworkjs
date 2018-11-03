@@ -140,6 +140,7 @@ class NfsFileState {
   constructor (itemPath, fileFetched, hasKey) {
     this.hasKey = hasKey              // Used to decide whether to insert() or update() the entry
     this._flags = undefined           // When open, set to NFS flags (e.g. NFS_FILE_MODE_READ etc)
+    this._isModified = false          // Set true when a write is performed
 
     // File identity and state
     this._fileDescriptor = undefined  // Valid only while open
@@ -184,12 +185,16 @@ class NfsFileState {
       if (this._fileOpened) {
         this._fileDescriptor = allNfsFiles.newDescriptor(this)
         this._flags = safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
+        this._isModified = true
         this._versionOpened = 0
         return true
       }
     } catch (e) { debug(e) }
     return false
   }
+
+  setModified () { this._isModified = true }
+  isModified () { return this._isModified }
 
   async open (nfs, nfsFlags) {
     try {
@@ -201,7 +206,7 @@ class NfsFileState {
         } else {
           opened = await nfs.open()
         }
-        debug('%s opened for write')
+        debug('opened (%s) for write', this._fileDescriptor)
       } else {
         let size
         this.isEmptyOpen = undefined
@@ -212,7 +217,7 @@ class NfsFileState {
         } catch (discard) {}
 
         if (!this.isEmptyOpen) opened = await nfs.open(this._fileFetched, nfsFlags)
-        debug('%s opened for read (size: %s)', size)
+        debug('opened (%s) for read (size: %s)', this._fileDescriptor, size)
       }
       this._fileOpened = opened
 
@@ -698,6 +703,7 @@ class NfsContainerFiles {
       }
       let bytes = content.length
       await fileState._fileOpened.write(content)
+      fileState.setModified()
       debug('%s bytes written to file.', bytes)
       return bytes
     } catch (e) {
@@ -738,6 +744,7 @@ class NfsContainerFiles {
         }
       }
       await fileState._fileOpened.write(buf.slice(0, len))
+      fileState.setModified()
       debug('%s bytes written to file.', len)
       return len
     } catch (e) {
@@ -780,6 +787,7 @@ class NfsContainerFiles {
       if (fileState && fileState.isOpen() && fileState.isWriteable()) {
         // Get state before it is invalidated by fileState.close()
         await fileState._truncate(this.nfs(), size)
+        fileState.setModified()
         return 0  // Success
       }
     } catch (e) {
@@ -807,11 +815,11 @@ class NfsContainerFiles {
       if (!fileState) fileState = this.getFileStateFromPathCache(itemPath)
 
       if (fileState && fileState.isOpen()) {
-        let isWriteable = fileState.isWriteable()
         // Get state before it is invalidated by fileState.close()
+        let isModified = fileState.isModified()
         let version = fileState.version()
         await fileState.close(this.nfs())
-        if (isWriteable) {
+        if (isModified) {
           let permissions // use defaults
           debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
           result = await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),

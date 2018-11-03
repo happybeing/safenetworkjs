@@ -24,18 +24,20 @@ const fakeReadDir = {
 }
 
 const defaultContainerNames = [
-  '_public',
   '_documents',
+  '_downloads',
   '_music',
-  '_video',
-  '_photos',
-  '_publicNames'
+  //  '_pictures', See https://github.com/maidsafe/safe_client_libs/issues/680
+  '_public',
+  '_publicNames',
+  '_videos'
 ]
 
 const containerTypeCodes = {
   defaultContainer: 'default-container',  // SAFE default container (e.g. _public, _publicNames etc)
   nfsContainer: 'nfs-container',    // an NFS container, or if in a default container an entry that ends with slash
   file: 'file',                     // an entry that doesn't end with slash
+  newFile: 'new-file',              // created, awaiting closeFile(), not yet stored in container
   fakeContainer: 'fake-container',  // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
   deletedEntry: 'deleted-entry',    // entry exists, but value has been deleted()
   servicesContainer: 'services-container',  // Services container for a public name
@@ -53,6 +55,7 @@ function isCacheableResult (containerType) {
   return containerType === containerTypeCodes.defaultContainer ||
          containerType === containerTypeCodes.nfsContainer ||
          containerType === containerTypeCodes.file ||
+         containerType === containerTypeCodes.newFile ||
          containerType === containerTypeCodes.fakeContainer ||
          containerType === containerTypeCodes.servicesContainer ||
          containerType === containerTypeCodes.sercice
@@ -180,10 +183,10 @@ class SafeContainer {
    * @return {Promise} the MutableData for this container
    */
   async initialise () {
+    if (this._mData) return this._mData
     debug('%s.initialise() for container _name: %s at _containerPath: %s', this.constructor.name, this._name, this._containerPath)
-    try {
-      if (this._mData) return this._mData
 
+    try {
       if (this.isDefaultContainer()) {
         // TODO check we have the desired permissions and if not request them
         debug('auth.getContainer(%s)', this._name)
@@ -421,7 +424,7 @@ class SafeContainer {
    * @return {Promise}     a suitable SAFE container for the entry value (mutable data)
    */
   async _createChildContainerForEntry (key) {
-    let msg = '_createChildContainerForEntry() should be overridden in extending class: ' + this.constructor.name
+    let msg = 'ERROR: SafeContainer._createChildContainerForEntry() should be overridden in extending class: ' + this.constructor.name
     debug(msg)
     throw new Error(msg)
   }
@@ -762,6 +765,7 @@ class SafeContainer {
                 } else if (itemMatch.indexOf(plainKey) === 0) {
                   // We've matched the key of a child container, so pass to child
                   let matchedChild = await this._getContainerForKey(plainKey)
+                  debug('calling matchedChild %s.%s(%s,...)', matchedChild.constructor.name, functionName, itemMatch.substring(plainKey.length + 1))
                   result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p2, p3, p4, p5)
                   debug('loop result-2: %o', await result)
                   resolve(result)
@@ -1185,6 +1189,15 @@ class SafeContainer {
     this._clearResultForPath(itemPath)
   }
 
+  _getResultHolderForPath (itemPath) {
+    let resultHolder = this._resultHolderMap[itemPath]
+    if (!resultHolder) {
+      resultHolder = {}
+      this._resultHolderMap[itemPath] = resultHolder
+    }
+    return resultHolder
+  }
+
   /**
    * Update _resultHolderMap and return a resultsRef
    *
@@ -1196,14 +1209,10 @@ class SafeContainer {
    */
   _updateResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
     debug('%s._updateResultForPath(%s, %s, %o, %o)', this.constructor.name, itemPath, fileOperation, operationResult, cacheTheResult)
-    let resultHolder = this._resultHolderMap[itemPath]
-    if (!resultHolder) {
-      resultHolder = {}
-      this._resultHolderMap[itemPath] = resultHolder
-    }
-
     cacheTheResult = cacheTheResult && process.env.SAFENETWORKJS_CACHE !== 'disable'
+
     if (cacheTheResult) {
+      let resultHolder = this._getResultHolderForPath(itemPath)
       resultHolder[fileOperation] = operationResult
     } else {
       this._clearResultForPath(itemPath)
@@ -1229,6 +1238,9 @@ class PublicContainer extends SafeContainer {
    * @param {Object} safeJs  SafenetworkApi (owner)
    */
   constructor (safeJs, containerName) {
+    if (defaultContainers[containerName] !== PublicContainer) {
+      throw new Error('Invalid PrivateContainer name:' + containerName)
+    }
     let containerPath = '/' + containerName
     let subTree = containerName + '/'
     super(safeJs, containerName, containerPath, subTree)
@@ -1259,13 +1271,31 @@ class PrivateContainer extends SafeContainer {
    * @param {String} containerName Name of a private default container such as '_documents'
    */
   constructor (safeJs, containerName) {
-    super(safeJs, containerName)
     if (defaultContainers[containerName] !== PrivateContainer) {
       throw new Error('Invalid PrivateContainer name:' + containerName)
     }
+    let containerPath = '/' + containerName
+    let subTree = containerName + '/'
+    super(safeJs, containerName, containerPath, subTree)
+// ???    throw new Error('TODO Implement PrivateContainer class (or switch to using PublicContainer?)')
   }
 
   isPublic () { return false }
+
+  /**
+   * Create a container object of the appropriate class to wrap an MD pointed to an entry in this (parent) container
+   *
+   * TODO review security & privacy, consider extra encryption (optional?).
+   *      see discussion https://safenetforum.org/t/apps-and-access-control/26023/53?u=happybeing
+   *
+   * @param  {String}  key a string matching a mutable data entry in this (parent) container
+   * @return {Promise}     a suitable SAFE container for the entry value (mutable data)
+   */
+  async _createChildContainerForEntry (key) {
+    debug('%s._createChildContainerForEntry(\'%s\') ', this.constructor.name, key)
+    let containerPath = key
+    return new NfsContainer(this._safeJs, key, containerPath, this, true)
+  }
 }
 
 /**
@@ -1862,11 +1892,43 @@ class NfsContainer extends SafeContainer {
 
   async createFile (itemPath) {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
+    let result
     try {
       this._clearCacheForModify(itemPath)
-      return this._files.createFile(itemPath)
+      result = await this._files.createFile(itemPath)
+      // This is ugly.
+      // After createFile(), but before closeFile() we fake the file's existence
+      // so that itemAttributes() can be used to check the createFile()
+      // succeeded. This is done by inserting an itemAttributes() result
+      // into the cache of this container *and* its parent container
+      if (result) {
+        let attributes = this._newFileAttributes()
+        this._updateResultForPath(itemPath, 'itemAttributes', attributes, isCacheableResult(attributes.entryType))
+        if (this._parent) {
+          // The parentItemPath is the itemPath the parent would see for this item
+          let parentItemPath = this._parentEntryKey.substring(this._parent._subTree.length)
+          parentItemPath = parentItemPath + (parentItemPath.substring(itemPath.length - 1) !== '/' ? '/' : '') + itemPath
+
+          this._parent._updateResultForPath(parentItemPath, 'itemAttributes', attributes, isCacheableResult(attributes.entryType))
+        }
+      }
     } catch (e) {
       debug(e.message)
+    }
+    return result
+  }
+
+  // Helper to cache an itemAttributes() entry for a new file, pending closeFile()
+  _newFileAttributes () {
+    let now = Date()
+    return {
+      modified: now,
+      accessed: now,
+      created: now,
+      size: 0,
+      version: 0,
+      'isFile': true,
+      entryType: containerTypeCodes.newFile
     }
   }
 

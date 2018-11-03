@@ -190,15 +190,19 @@
     [/] fixup old services code
     [/] modify RootHandler to automount URIs give as a filename: _webMounts/service.name
     [/] BUG mount not working for single parts URIs (e.g. safe://heaven, safe://hello)
+  [/] get mount of private containers working
+    [/] change how I request permissions
+        See: https://safenetforum.org/t/apps-and-access-control/26023/66?u=happybeing
+             https://safenetforum.org/t/apps-and-access-control/26023/67?u=happybeing
   [ ] feature: SAFE Drive operation without SAFE a/c login for browsing public files
   [ ] cleaner code:
-    [ ] migrate to ES6 import etc
-    [ ] is it supported by nexe?
-    [ ] check supported by pkg
-    [ ] test with pkg in safe-cli-boilerplate
-    [ ] test in safenetworkjs branch
-    [ ] test in safenetwork-fuse branch
-    [ ] done!
+  [ ] is ES6 import etc supported by pkg?
+    [ ] is ES6 import etc supported by nexe?
+    [ ] trial safe-cli-boilerplate: migrate to ES6 import etc
+      -> all on branch: es6-import
+      [ ] migrate safe-cli-boilerplate and test with pkg
+      [ ] migrate safenetworkjs and test with pkg
+      [ ] migrate safenetwork-fuse and test with pkg
   [ ] adopt: import { CONSTANTS as SAFE_CONSTANTS } from '@maidsafe/safe-node-app'
   [/] BUG SERIOUS `touch file` updates time but truncates file size to zero
   [ ] BUG `touch file` updates file modified time but gives Remote I/O error (prob need to implement FUSE utimens()))
@@ -302,6 +306,7 @@ LATER
   [ ] test LDP with Solid Plume
   [ ] test remotestorage with Litewrite
 [/] change to generic JSON interface
+[ ] Review ipmplementation of PrivateContainer (see TODO in source code)
 [ ] move the 'safenetworkjs and safenetwork-web' notes to README.md of both modules
 [ ] get SafenetworkJs working for both desktop and web app
   [/] move safe-cli-boilerplate bootstrap() into safenetworkjs
@@ -471,25 +476,31 @@ const untrustedAppConfig = {
   vendor: 'Untrusted'
 }
 
-const fullPermissions = ['Read', 'Insert', 'Update', 'Delete']
 
 // Default permissions to request. Optional parameter to SafenetworkApi.simpleAuthorise()
 //
-const defaultPerms = {
+
+const fullPermissions = ['Read', 'Insert', 'Update', 'Delete', 'ManagePermissions']
+
+const defaultContainerPerms = {
   // The following defaults have been chosen to allow creation of public names
   // and containers, as required for accessing SAFE web services.
   //
   // ref: https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
   //
-  // If your app doesn't need those features it can specify only the permissions
-  // it needs when calling SafenetworkApi.simpleAuthorise()
+  // If your app doesn't need those features it can use a customised list
+  // and specify only the permissions it needs when calling SafenetworkApi.simpleAuthorise()
+  //
+  // If your app needs extra permissions (e.g. 'ManagePermissions') it must
+  // use a custom list.
   _public: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _documents: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _downloads: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _music: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _pictures: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _videos: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
-  _publicNames: ['Read', 'Insert', 'Update', 'Delete'] // TODO maybe reduce defaults later
+  _publicNames: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
+  NfsContainer: ['Read', 'Insert', 'Update', 'Delete'] // TODO maybe reduce defaults later
 }
 
 /*
@@ -896,7 +907,7 @@ class SafenetworkApi {
   * @return {Promise}             true on success
   */
   async nfsMutate (nfs, permissions, operation, fileName, file, version, newMetadata) {
-    let perms = permissions !== undefined ? permissions : ['Read', 'Insert', 'Update', 'Delete']
+    let perms = permissions !== undefined ? permissions : defaultContainerPerms['NfsContainer']
     let result
     try {
       result = this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
@@ -3171,6 +3182,7 @@ module.exports.safeUtils = safeUtils
 module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
 module.exports.containerTypeCodes = containers.containerTypeCodes
 
+module.exports.defaultContainerPerms = defaultContainerPerms
 module.exports.fullPermissions = fullPermissions
 
 module.exports.ERRORS = SafenetworkJsErrors
