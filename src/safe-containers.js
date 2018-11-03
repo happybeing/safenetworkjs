@@ -11,17 +11,9 @@
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
 const debug = require('debug')('safenetworkjs:container')  // Web API
-const path = require('path')
 const u = require('./safenetwork-utils')
-const SafeJs = require('./safenetwork-api')
 const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
 const CONSTANTS = require('./constants')
-
-// TODO remove this
-const fakeReadDir = {
-  '/': ['_public', 'two', 'three'],
-  '/_public': ['four', 'five', 'happybeing']
-}
 
 const defaultContainerNames = [
   '_documents',
