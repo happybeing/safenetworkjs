@@ -50,7 +50,7 @@ function isCacheableResult (containerType) {
          containerType === containerTypeCodes.newFile ||
          containerType === containerTypeCodes.fakeContainer ||
          containerType === containerTypeCodes.servicesContainer ||
-         containerType === containerTypeCodes.sercice
+         containerType === containerTypeCodes.service
 }
 
 /**
@@ -1149,23 +1149,25 @@ class SafeContainer {
   /** File system operation results cache
   */
   _clearCacheForCreateFile (itemPath) {
-    let base = u.itemPathBasename(itemPath)
-    if (base) this._clearResultForPath(itemPath)
+    let parentDir = u.parentPath(itemPath)
+    if (parentDir) this._clearResultForPath(itemPath)
   }
 
   _clearCacheForModify (itemPath) {
     this._clearResultForPath(itemPath)
-    let base = u.itemPathBasename(itemPath)
-    if (base !== itemPath) this._clearResultForPath(base)
+    let parentDir = u.parentPath(itemPath)
+    if (parentDir !== itemPath) this._clearResultForPath(parentDir)
   }
 
   _clearCacheForDelete (itemPath) {
     this._clearResultForPath(itemPath)
-    let base = u.itemPathBasename(itemPath)
-    if (base !== itemPath) this._clearCacheForDelete(base) // Recurse to clear all parent folders
+    let parentDir = u.parentPath(itemPath)
+    if (parentDir !== itemPath) this._clearCacheForDelete(parentDir) // Recurse to clear all parent folders
   }
 
   _clearResultForPath (itemPath) {
+    if (itemPath === '.') itemPath = ''
+
     debug('%s._clearResultForPath(%s)', this.constructor.name, itemPath)
     delete this._resultHolderMap[itemPath]
     // Parent container has a cache too:
