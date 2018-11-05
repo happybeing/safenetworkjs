@@ -284,6 +284,24 @@ class NfsContainerFiles {
     return (fileState && fileState.isWriteable())
   }
 
+  enableLowBalanceWarning () {
+    // TODO replace with UI to inform user see issue #
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+  }
+
+  disableLowBalanceWarning () {
+  }
+
   /**
    * get cached state from file descriptor or path
    *
@@ -824,6 +842,7 @@ class NfsContainerFiles {
           debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
           result = await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),
             fileState._itemPath, fileState._fileOpened, version + 1, fileState._newMetadata)
+          this.disableLowBalanceWarning()
         }
         this._purgeFileState(fileState) // Invalidate cached state after closeFile()
       }
@@ -833,6 +852,9 @@ class NfsContainerFiles {
       // close/insert/update failed so invalidate cached state
       if (fileState) this._purgeFileState(fileState)
       debug(e)
+      if (e.code === CONSTANTS.ERROR_CODE.LOW_BALANCE) {
+        this.enableLowBalanceWarning()
+      }
     }
     return result
   }
