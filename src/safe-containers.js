@@ -55,7 +55,7 @@ function isCacheableResult (fileOperation, operationResult) {
       containerType === containerTypeCodes.service
   }
   if (fileOperation === 'listFolder') {
-    return false
+    return true
   }
   return false
 }
@@ -527,8 +527,24 @@ class SafeContainer {
     return entriesList
   }
 
-  async listFolder (folderPath) {
-    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
+  /**
+   * Get listing of folder
+   * @param  {String}  folderPath
+   * @return {Promise}    list of file and folder names in the folder
+   */
+  async listFolder (itemPath) {
+    debug('%s.listFolder(\'%s\')', this.constructor.name, itemPath)
+
+    try {
+      let resultsRef = await this.listFolderResultsRef(itemPath)
+      if (resultsRef) return resultsRef.result
+    } catch (e) {
+      debug(e)
+    }
+  }
+
+  async listFolderResultsRef (folderPath) {
+    debug('%s.listFolderResulsRef(\'%s\')', this.constructor.name, folderPath)
 
     let listing = []
     try {
@@ -600,14 +616,13 @@ class SafeContainer {
       })
       await Promise.all(listingQ).catch((e) => debug(e.message))
       debug('%s.listing-4-END: %o', constructor.name, listing)
-      return listing
     } catch (e) {
       debug(e.message)
       debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
     debug('%s.listing-5-END: %o', constructor.name, listing)
-    return listing
+    return this._updateResultForPath(folderPath, 'listFolder', listing)
   }
 
   async listFolder_FIRSTATTEMPT (folderPath) {
@@ -1009,11 +1024,11 @@ class SafeContainer {
     }
   }
 
-  async renameFile (itemPath, newItemPath, newFullPath) {
-    debug('%s.renameFile(\'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
+  async renameFile (itemPath, newItemPath) {
+    debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'renameFile', newItemPath, newFullPath)
+      return await this.callFunctionOnItem(itemPath, 'renameFile', newItemPath)
     } catch (e) {
       debug(e.message)
     }
@@ -1155,39 +1170,85 @@ class SafeContainer {
 
   /** File system operation results cache
   */
-  _clearCacheForCreateFile (itemPath) {
+  async _handleCacheForCreateFile (itemPath) {
+    await this._handleCacheListFolderAddItem(itemPath)
     let parentDir = u.parentPath(itemPath)
-    if (parentDir) this._clearResultForPath(itemPath)
+    if (parentDir) this._clearResultForPath('itemAttributes', itemPath)
   }
 
-  _clearCacheForModify (itemPath) {
-    this._clearResultForPath(itemPath)
+  async _handleCacheForDelete (itemPath) {
+    await this._handleCacheListFolderRemoveItem(itemPath)
+    this._clearResultForPath('itemAttributes', itemPath)
     let parentDir = u.parentPath(itemPath)
-    if (parentDir !== itemPath) this._clearResultForPath(parentDir)
-  }
+    if (parentDir !== itemPath) await this._handleCacheForDelete(parentDir) // Recurse to clear all parent folders
 
-  _clearCacheForDelete (itemPath) {
-    this._clearResultForPath(itemPath)
-    let parentDir = u.parentPath(itemPath)
-    if (parentDir !== itemPath) this._clearCacheForDelete(parentDir) // Recurse to clear all parent folders
-  }
-
-  _clearResultForPath (itemPath) {
-    if (itemPath === '.') itemPath = ''
-
-    debug('%s._clearResultForPath(%s)', this.constructor.name, itemPath)
-    delete this._resultHolderMap[itemPath]
     // Parent container has a cache too:
     // TODO when containers have multiple parents, make this iterate over _parents[]
-    if (this._parent) this._parent._clearCacheForChildContainer(this._containerPath, itemPath)
+    if (this._parent) await this._parent._handleCacheForDelete(this._makeItemPathForParent(itemPath))
   }
 
-  // Called by a child container to clear our cache entry
-  _clearCacheForChildContainer (childContainerPath, childItemPath) {
-    let pathPrefix = this._subTree
-    if (this._subTree[0] === '/') pathPrefix = this._subTree.substring(1)
-    let itemPath = childContainerPath.substring(pathPrefix.length) + childItemPath
-    this._clearResultForPath(itemPath)
+  async _handleCacheForRename (itemPath, newItemPath) {
+    // Handle create before delete, otherwise the handle delete may wrongly
+    // act on directory becoming empty
+    await this._handleCacheForCreateFile(newItemPath)
+    await this._handleCacheForDeleteFile(itemPath)
+  }
+
+  async _handleCacheListFolderAddItem (itemPath) {
+    let folderPath = u.parentPath(itemPath)
+    let itemName = u.itemPathBasename(itemPath)
+
+    try {
+      let listFolderResult
+      let resultsHolder = this._resultHolderMap[folderPath]
+      if (resultsHolder) listFolderResult = resultsHolder['listFolder']
+      if (!listFolderResult) {
+        let resultsRef = await this.listFolderResultsRef(folderPath)
+        listFolderResult = resultsRef.result
+      }
+      if (listFolderResult.indexOf(itemName) === -1) listFolderResult.push(itemName)
+    } catch (e) { debug(e) }
+  }
+
+  async _handleCacheListFolderRemoveItem (itemPath) {
+    let folderPath = u.parentPath(itemPath)
+    let itemName = u.itemPathBasename(itemPath)
+
+    try {
+      let listFolderResult
+      let resultsHolder = this._resultHolderMap[folderPath]
+      if (resultsHolder) listFolderResult = resultsHolder['listFolder']
+      if (!listFolderResult) {
+        let resultsRef = await this.listFolderResultsRef(folderPath)
+        listFolderResult = resultsRef.result
+      }
+      listFolderResult.delete(itemName)
+    } catch (e) { debug(e) }
+  }
+
+  _handleCacheForChangedAttributes (itemPath) {
+    this._clearResultForPath('itemAttributes', itemPath)
+    let parentDir = u.parentPath(itemPath)
+    if (parentDir !== itemPath) this._clearResultForPath('itemAttributes', parentDir)
+  }
+
+  _clearResultForPath (fileOperation, itemPath) {
+    if (itemPath === '.') itemPath = ''
+
+    debug('%s._clearResultForPath(%s, %s)', this.constructor.name, fileOperation, itemPath)
+    let resultsHolder = this._resultHolderMap[itemPath]
+    if (resultsHolder && resultsHolder[fileOperation]) {
+      delete resultsHolder[fileOperation]
+    }
+    // Parent container has a cache too:
+    // TODO when containers have multiple parents, make this iterate over _parents[]
+    if (this._parent) this._parent._clearResultForPath(fileOperation, this._makeItemPathForParent(itemPath))
+  }
+
+  _makeItemPathForParent (itemPath) {
+    let pathPrefix = this._parent._subTree
+    if (this._subTree[0] === '/') pathPrefix = this._parent.substring(1)
+    return this._containerPath.substring(pathPrefix.length) + itemPath
   }
 
   _getResultHolderForPath (itemPath) {
@@ -1220,7 +1281,7 @@ class SafeContainer {
       let resultHolder = this._getResultHolderForPath(itemPath)
       resultHolder[fileOperation] = operationResult
     } else {
-      this._clearResultForPath(itemPath)
+      this._clearResultForPath(fileOperation, itemPath)
     }
 
     // Return a resultsRef
@@ -1797,7 +1858,7 @@ class NfsContainer extends SafeContainer {
     debug('%s.itemAttributesResultRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileOperation = 'itemAttributes'
 
-    // Look for a resultsRef
+    // Look for a cached resultsRef
     let resultHolder = this._resultHolderMap[itemPath]
     if (resultHolder && resultHolder[fileOperation]) {
       return {
@@ -1899,7 +1960,7 @@ class NfsContainer extends SafeContainer {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     let result
     try {
-      this._clearCacheForModify(itemPath)
+      this._handleCacheForChangedAttributes(itemPath)
       result = await this._files.createFile(itemPath)
       // This is ugly.
       // After createFile(), but before closeFile() we fake the file's existence
@@ -1940,7 +2001,7 @@ class NfsContainer extends SafeContainer {
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
-      if (this._files.isWriteable(itemPath, fd)) this._clearCacheForModify(itemPath)
+      if (this._files.isWriteable(itemPath, fd)) this._handleCacheForChangedAttributes(itemPath)
       return this._files.closeFile(itemPath, fd)
     } catch (e) {
       debug(e.message)
@@ -1950,8 +2011,9 @@ class NfsContainer extends SafeContainer {
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     try {
-      this._clearCacheForDelete(itemPath)
-      return this._files.deleteFile(itemPath)
+      let result = this._files.deleteFile(itemPath)
+      if (result) await this._handleCacheForDelete(itemPath)
+      return result
     } catch (e) {
       debug(e.message)
     }
@@ -1967,8 +2029,8 @@ class NfsContainer extends SafeContainer {
   // here: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
   //
   // POSIX Ref: http://pubs.opengroup.org/onlinepubs/9699919799/
-  async renameFile (itemPath, newItemPath, newFullPath) {
-    debug('%s.renameFile(\'%s\', \'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath, newFullPath)
+  async renameFile (itemPath, newItemPath) {
+    debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
 
     try {
       // Don't allow renaming directories because it can use up a lot of entries fast
@@ -1983,7 +2045,7 @@ class NfsContainer extends SafeContainer {
       if (itemPath === trimmedNewPath) return // Rename to self so do nothing
 
       await this._files.moveFile(itemPath, trimmedNewPath)
-      this._clearCacheForModify(itemPath)
+      this._handleCacheForChangedAttributes(itemPath, newItemPath)
       return true
     } catch (e) {
       debug(e)
@@ -2015,7 +2077,7 @@ class NfsContainer extends SafeContainer {
    */
   async setFileMetadata (itemPath, fd, metadata) {
     try {
-      this._clearCacheForModify(itemPath)
+      this._handleCacheForChangedAttributes(itemPath)
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
       debug(e.message)
