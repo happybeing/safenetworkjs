@@ -43,14 +43,21 @@ const containerTypeCodes = {
  * @param  {String} containerType a value from containerTypeCodes
  * @return {Boolean} true if the type should have cached results
  */
-function isCacheableResult (containerType) {
-  return containerType === containerTypeCodes.defaultContainer ||
-         containerType === containerTypeCodes.nfsContainer ||
-         containerType === containerTypeCodes.file ||
-         containerType === containerTypeCodes.newFile ||
-         containerType === containerTypeCodes.fakeContainer ||
-         containerType === containerTypeCodes.servicesContainer ||
-         containerType === containerTypeCodes.service
+function isCacheableResult (fileOperation, operationResult) {
+  if (fileOperation === 'itemAttributes') {
+    let containerType = operationResult.entryType
+    return containerType === containerTypeCodes.defaultContainer ||
+      containerType === containerTypeCodes.nfsContainer ||
+      containerType === containerTypeCodes.file ||
+      containerType === containerTypeCodes.newFile ||
+      containerType === containerTypeCodes.fakeContainer ||
+      containerType === containerTypeCodes.servicesContainer ||
+      containerType === containerTypeCodes.service
+  }
+  if (fileOperation === 'listFolder') {
+    return false
+  }
+  return false
 }
 
 /**
@@ -963,7 +970,7 @@ class SafeContainer {
       throw e
     }
 
-    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
+    return this._updateResultForPath(itemPath, fileOperation, result)
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1195,17 +1202,21 @@ class SafeContainer {
   /**
    * Update _resultHolderMap and return a resultsRef
    *
+   * NOTE: changes here need to be reflected in safetwork-fuse RootContainer
+   *
    * @param  {String} itemPath
    * @param  {String} fileOperation
    * @param  {Object} operationResult
-   * @param  {Boolean} cacheTheResult if true updates cache, otherwise clears it
+   * @param  {Boolean} cacheTheResult [optional] if false, clears cache rather than updates
    * @return {Object} A 'resultsRef' which has the result, its cache location
    */
   _updateResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
     debug('%s._updateResultForPath(%s, %s, %o, %o)', this.constructor.name, itemPath, fileOperation, operationResult, cacheTheResult)
+    if (cacheTheResult === undefined) cacheTheResult = true
     cacheTheResult = cacheTheResult && process.env.SAFENETWORKJS_CACHE !== 'disable'
 
-    if (cacheTheResult) {
+    // Caller wants it cached, but also check if it is cacheable
+    if (cacheTheResult && isCacheableResult(fileOperation, operationResult)) {
       let resultHolder = this._getResultHolderForPath(itemPath)
       resultHolder[fileOperation] = operationResult
     } else {
@@ -1575,7 +1586,7 @@ class ServicesContainer extends SafeContainer {
       debug(e.message)
     }
 
-    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
+    return this._updateResultForPath(itemPath, fileOperation, result)
   }
 }
 
@@ -1872,7 +1883,7 @@ class NfsContainer extends SafeContainer {
     if (!result) result = { entryType: containerTypeCodes.notFound }
 
     debug('%s is type: %s', itemPath, result.entryType)
-    return this._updateResultForPath(itemPath, fileOperation, result, isCacheableResult(result.entryType))
+    return this._updateResultForPath(itemPath, fileOperation, result)
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1897,13 +1908,13 @@ class NfsContainer extends SafeContainer {
       // into the cache of this container *and* its parent container
       if (result) {
         let attributes = this._newFileAttributes()
-        this._updateResultForPath(itemPath, 'itemAttributes', attributes, isCacheableResult(attributes.entryType))
+        this._updateResultForPath(itemPath, 'itemAttributes', attributes)
         if (this._parent) {
           // The parentItemPath is the itemPath the parent would see for this item
           let parentItemPath = this._parentEntryKey.substring(this._parent._subTree.length)
           parentItemPath = parentItemPath + (parentItemPath.substring(itemPath.length - 1) !== '/' ? '/' : '') + itemPath
 
-          this._parent._updateResultForPath(parentItemPath, 'itemAttributes', attributes, isCacheableResult(attributes.entryType))
+          this._parent._updateResultForPath(parentItemPath, 'itemAttributes', attributes)
         }
       }
     } catch (e) {
