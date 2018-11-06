@@ -389,7 +389,9 @@ const isCacheableResult = containers.isCacheableResult
 const safeUtils = require('./safenetwork-utils')
 
 // Decorated console output
-const debug = require('debug')
+const debug = require('debug')('safenetworkjs:api')
+const error = require('debug')('safenetworkjs:error')
+
 const logApi = require('debug')('safenetworkjs:web')  // Web API
 const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
 const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
@@ -583,17 +585,17 @@ class SafenetworkApi {
     this._lowBalanceWarning = true
 
     // TODO  Highlight in debug ouptput. Good a place to keep a breakpoint
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
-    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    error('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
   }
 
   disableLowBalanceWarning () {
