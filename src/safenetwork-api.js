@@ -579,6 +579,29 @@ class SafenetworkApi {
     this.defaultContainerNames = containers.defaultContainerNames
   }
 
+  enableLowBalanceWarning () {
+    this._lowBalanceWarning = true
+
+    // TODO  Highlight in debug ouptput. Good a place to keep a breakpoint
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+    debug('WARNING: LOW BALANCE LOW BALANCE LOW BALANCE LOW BALANCE')
+  }
+
+  disableLowBalanceWarning () {
+    this._lowBalanceWarning = false
+  }
+
+  isLowBalanceActive () { return this._lowBalanceWarning === true }
+
   /**
    * Enable the SAFE Services API
    *
@@ -891,6 +914,9 @@ class SafenetworkApi {
       result = true
     } catch (e) {
       debug(e)
+      if (e.code === CONSTANTS.ERROR_CODE.LOW_BALANCE) {
+        this.enableLowBalanceWarning()
+      }
     }
     return result
   }
