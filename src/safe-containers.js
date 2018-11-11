@@ -1222,7 +1222,12 @@ class SafeContainer {
         let resultsRef = await this.listFolderResultsRef(folderPath)
         listFolderResult = resultsRef.result
       }
-      listFolderResult.delete(itemName)
+
+      // Remove itemName from the result
+      var itemIndex = listFolderResult.indexOf(itemName)
+      if (itemIndex > -1) {
+        listFolderResult.splice(itemIndex, 1)
+      }
     } catch (e) { debug(e) }
   }
 
