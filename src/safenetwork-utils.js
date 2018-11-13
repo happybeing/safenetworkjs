@@ -53,6 +53,13 @@ const parentPath = function (itemPath) {
   return path.dirname(itemPath)
 }
 
+// Return '' rather than '.' for current directory
+const parentPathNoDot = function (itemPath) {
+  let parentPath = path.dirname(itemPath)
+  if (parentPath === '.') parentPath = ''
+  return parentPath
+}
+
 // Used to cache file info
 const Cache = function (maxAge) {
   this.maxAge = maxAge
@@ -191,6 +198,7 @@ module.exports.itemPathpart = itemPathpart
 module.exports.hostpart = hostpart
 module.exports.protocol = protocol
 module.exports.parentPath = parentPath
+module.exports.parentPathNoDot = parentPathNoDot
 module.exports.Cache = Cache
 
 // Adapted/copied from node-solid-server

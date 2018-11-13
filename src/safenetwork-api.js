@@ -445,7 +445,7 @@ const docpart = safeUtils.docpart
 const pathpart = safeUtils.pathpart
 const hostpart = safeUtils.hostpart
 const protocol = safeUtils.protocol
-const parentPath = safeUtils.parentPath
+const parentPathNoDot = safeUtils.parentPathNoDot
 const addLink = safeUtils.addLink
 const addLinks = safeUtils.addLinks
 const Metadata = safeUtils.Metadata
@@ -571,7 +571,7 @@ class SafenetworkApi {
     this.pathpart = pathpart
     this.hostpart = hostpart
     this.protocol = protocol
-    this.parentPath = parentPath
+    this.parentPathNoDot = parentPathNoDot
 
     this.SN_TAGTYPE_SERVICES = SN_TAGTYPE_SERVICES
     this.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
@@ -3236,7 +3236,7 @@ module.exports.docpart = safeUtils.docpart
 module.exports.pathpart = safeUtils.pathpart
 module.exports.hostpart = safeUtils.hostpart
 module.exports.protocol = safeUtils.protocol
-module.exports.parentPath = safeUtils.parentPath
+module.exports.parentPathNoDot = safeUtils.parentPathNoDot
 
 module.exports.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
 module.exports.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
