@@ -200,15 +200,14 @@ class NfsFileState {
     try {
       // this._fileOpened = this.isWriteable(nfsFlags) ? await nfs.open() : await nfs.open(this._fileFetched, nfsFlags)
       let opened
+      let size
       if (this.isWriteable(nfsFlags)) {
         if (this._fileFetched) {
           opened = await nfs.open(this._fileFetched, nfsFlags)
         } else {
           opened = await nfs.open()
         }
-        debug('opened (%s) for write', this._fileDescriptor)
       } else {
-        let size
         this.isEmptyOpen = undefined
         try {
           // NFS fails to open zero length files for read, so we must fake it
@@ -217,7 +216,6 @@ class NfsFileState {
         } catch (discard) {}
 
         if (!this.isEmptyOpen) opened = await nfs.open(this._fileFetched, nfsFlags)
-        debug('opened (%s) for read (size: %s)', this._fileDescriptor, size)
       }
       this._fileOpened = opened
 
@@ -225,6 +223,11 @@ class NfsFileState {
         this._fileDescriptor = allNfsFiles.newDescriptor(this)
         this._flags = nfsFlags
         this._versionOpened = this._fileFetched.version
+        if (this.isWriteable()) {
+          debug('opened (%s) for write', this._fileDescriptor)
+        } else {
+          debug('opened (%s) for read (size: %s)', this._fileDescriptor, size)
+        }
         return true
       }
     } catch (e) { debug(e) }
@@ -265,7 +268,8 @@ class NfsFileState {
 }
 
 class NfsContainerFiles {
-  constructor (safeJs, mData, nfs) {
+  constructor (owner, safeJs, mData, nfs) {
+    this._owner = owner
     this._safeJs = safeJs
     this._mData = mData
     this._nfs = nfs
@@ -401,6 +405,8 @@ class NfsContainerFiles {
         result = await this._safeJs.nfsMutate(this.nfs(), perms, 'update', destinationPath, srcFileState._fileFetched, destFileState.version() + 1)
         this._purgeFileState(destFileState) // New file so purge the cache
       }
+      this._owner._handleCacheForCreateFileOrOpenWrite(destinationPath)
+
       // After using the fetched file to update another entry, it takes on the version of the other, so needs refreshing
       this._purgeFileState(srcFileState)
     } catch (e) {
@@ -455,6 +461,7 @@ class NfsContainerFiles {
         // Also the error is odd: currently when file open() for write, _fileOpened.size() gives strange error: '-1016: Invalid file mode (e.g. trying to write when file is opened for reading only)')
         debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         debug('fileState: %o', fileState)
+        if (fileState.isWriteable()) this._owner._handleCacheForCreateFileOrOpenWrite(itemPath)
         return fileState.fileDescriptor()
       } else {
         throw new Error('openFile() failed')
@@ -484,6 +491,7 @@ class NfsContainerFiles {
       if (fileState && await fileState.create(this.nfs())) {
         debug('file (%s) created: ', fileState.fileDescriptor())
         debug('fileState: %o', fileState)
+        this._owner._handleCacheForCreateFileOrOpenWrite(itemPath)
         return fileState.fileDescriptor()
       } else {
         throw new Error('createFile() failed')
@@ -522,6 +530,7 @@ class NfsContainerFiles {
         this._purgeFileState(fileState) // File no longer exists so purge cache
         if (result) {
           debug('file deleted: ', itemPath)
+          await this._owner._handleCacheForDelete(itemPath)
         } else {
           throw new Error('file delete failed for: ', itemPath)
         }
@@ -564,6 +573,7 @@ class NfsContainerFiles {
     try {
       let fileState = this.getCachedFileState(itemPath, fd)
       if (fileState) fileState._newMetadata = metadata
+      this._owner._handleCacheForChangedAttributes(itemPath)
     } catch (e) { debug(e) }
   }
 
@@ -697,6 +707,7 @@ class NfsContainerFiles {
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
           debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
+          if (fileState.isWriteable()) this._owner._handleCacheForCreateFileOrOpenWrite(itemPath)
         } else {
           throw new Error('failed to open file')
         }
@@ -739,6 +750,7 @@ class NfsContainerFiles {
       if (!fileState.isOpen()) {
         if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE)) {
           debug('file (%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
+          if (fileState.isWriteable()) this._owner._handleCacheForCreateFileOrOpenWrite(itemPath)
         } else {
           throw new Error('failed to open file')
         }
@@ -820,6 +832,7 @@ class NfsContainerFiles {
         let version = fileState.version()
         await fileState.close(this.nfs())
         if (isModified) {
+          this._owner._handleCacheForChangedAttributes(itemPath)
           let permissions // use defaults
           debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
           result = await this._safeJs.nfsMutate(this.nfs(), permissions, (fileState.hasKey ? 'update' : 'insert'),
