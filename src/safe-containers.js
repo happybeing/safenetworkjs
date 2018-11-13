@@ -10,7 +10,9 @@
 
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
-const debug = require('debug')('safenetworkjs:container')  // Web API
+const debug = require('debug')('safenetworkjs:containers')
+const debugEntry = require('debug')('safenetworkjs:container-entries')
+
 const u = require('./safenetwork-utils')
 const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
 const CONSTANTS = require('./constants')
@@ -487,8 +489,8 @@ class SafeContainer {
         try { plainKey = await this._mData.decrypt(plainKey) } catch (e) { console.log('Key decryption ERROR: %s', e) }
         plainKey = enc.decode(new Uint8Array(plainKey))
         if (plainKey !== entry.key.toString())
-          debug('Key (encrypted): ', entry.key.toString())
-        debug('Key            : ', plainKey)
+          debugEntry('Key (encrypted): ', entry.key.toString())
+        debugEntry('Key            : ', plainKey)
         decodedEntry.plainKey = plainKey
       }
 
@@ -497,10 +499,10 @@ class SafeContainer {
         try { plainValue = await this._mData.decrypt(plainValue) } catch (e) { debug('Value decryption ERROR: %s', e) }
         plainValue = enc.decode(new Uint8Array(plainValue))
         if (plainValue !== entry.value.buf.toString())
-          debug('Value (encrypted): ', entry.value.buf.toString())
-        debug('Value            :', plainValue)
+          debugEntry('Value (encrypted): ', entry.value.buf.toString())
+        debugEntry('Value            :', plainValue)
 
-        debug('Version: ', entry.value.version)
+        debugEntry('Version: ', entry.value.version)
         decodedEntry.plainValue = plainValue
       }
 
@@ -523,7 +525,7 @@ class SafeContainer {
         entriesList.push({'key': key, 'value': val})
       })
     } catch (e) { debug(e) }
-    debug('entriesList: %O', entriesList)
+    debugEntry('entriesList: %O', entriesList)
     return entriesList
   }
 
@@ -578,8 +580,8 @@ class SafeContainer {
 
           // For matching we ignore a trailing '/' so remove if present
             let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-            debug('Match Key      : ', matchKey)
-            debug('Folder Match   : ', folderMatch)
+            debugEntry('Match Key      : ', matchKey)
+            debugEntry('Folder Match   : ', folderMatch)
             // Ignore metadata entries
             if (this.isHiddenEntry(plainKey)) {
               resolve()
@@ -590,7 +592,7 @@ class SafeContainer {
               // Item is the first part of the path
               let item = plainKey.split('/')[0]
               if (item && item.length && listing.indexOf(item) === -1) {
-                debug('listing-1.push(\'%s\')', item)
+                debugEntry('listing-1.push(\'%s\')', item)
                 listing.push(item)
               }
             } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
@@ -598,7 +600,7 @@ class SafeContainer {
               // item is the first part of the path after the folder (plus a '/')
               let item = plainKey.substring(folderMatch.length).split('/')[1]
               if (item && item.length && listing.indexOf(item) === -1) {
-                debug('listing-2.push(\'%s\')', item)
+                debugEntry('listing-2.push(\'%s\')', item)
                 listing.push(item)
               }
             } else if (folderMatch.indexOf(plainKey) === 0) {
@@ -608,20 +610,20 @@ class SafeContainer {
               if (subFolder[0] === '/') subFolder = subFolder.substring(1)
               let childList = await matchedChild.listFolder(subFolder)
               listing = listing.concat(childList)
-              debug('%s.listing-3: %o', constructor.name, listing)
+              debugEntry('%s.listing-3: %o', constructor.name, listing)
             }
             resolve() // Resolve the entry's promise
           }).catch((e) => debug(e.message)))
         }
       })
       await Promise.all(listingQ).catch((e) => debug(e.message))
-      debug('%s.listing-4-END: %o', constructor.name, listing)
+      debugEntry('%s.listing-4-END: %o', constructor.name, listing)
     } catch (e) {
       debug(e.message)
       debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
-    debug('%s.listing-5-END: %o', constructor.name, listing)
+    debugEntry('%s.listing-5-END: %o', constructor.name, listing)
     return this._updateResultForPath(folderPath, 'listFolder', listing)
   }
 
@@ -753,20 +755,20 @@ class SafeContainer {
               // let enc = new TextDecoder()
               // let plainKey = enc.decode(new Uint8Array(entry.key))
               // if (plainKey !== entry.key.toString())
-              //   debug('Key (encrypted): ', entry.key.toString())
+              //   debugEntry('Key (encrypted): ', entry.key.toString())
 
               // For matching we ignore a trailing '/' so remove if present
               let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-              debug('Key            : ', plainKey)
-              debug('Match Key      : ', matchKey)
+              debugEntry('Key            : ', plainKey)
+              debugEntry('Match Key      : ', matchKey)
 
               // plainValue = enc.decode(new Uint8Array(plainValue))
               // if (plainValue !== entry.value.buf.toString())
-              //   debug('Value (encrypted): ', entry.value.buf.toString())
+              //   debugEntry('Value (encrypted): ', entry.value.buf.toString())
               //
-              // debug('Value            :', plainValue)
+              // debugEntry('Value            :', plainValue)
               //
-              // debug('Version: ', entry.value.version)
+              // debugEntry('Version: ', entry.value.version)
 
               if (!this.isHiddenEntry(plainKey)) {
                 // Check it the itemMatch is at the start of the key, and *shorter*
@@ -774,14 +776,14 @@ class SafeContainer {
                   // Item is the first part of the path after the folder (plus a '/')
                   let item = plainKey.substring(itemMatch.length + 1).split('/')[1]
                   result = this[functionName](item, p2, p3, p4, p5)
-                  debug('loop result-1: %o', await result)
+                  debugEntry('loop result-1: %o', await result)
                   resolve(result)
                 } else if (itemMatch.indexOf(plainKey) === 0) {
                   // We've matched the key of a child container, so pass to child
                   let matchedChild = await this._getContainerForKey(plainKey)
                   debug('calling matchedChild %s.%s(%s,...)', matchedChild.constructor.name, functionName, itemMatch.substring(plainKey.length + 1))
                   result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p2, p3, p4, p5)
-                  debug('loop result-2: %o', await result)
+                  debugEntry('loop result-2: %o', await result)
                   resolve(result)
                 }
               }
@@ -876,7 +878,7 @@ class SafeContainer {
 
     // We add this._subTree to the front of the path
     let itemMatch = this._subTree + itemPath
-    debug('Matching path: ', itemMatch)
+    debugEntry('Matching path: ', itemMatch)
 
     let result
     let resultQ = []
@@ -891,13 +893,13 @@ class SafeContainer {
           resultQ.push(new Promise(async (resolve, reject) => {
             let decodedEntry = await this._decodeEntry(entry, {decodeKey: true})
             let plainKey = decodedEntry.plainKey
-            debug('Key            : ', plainKey)
-            debug('Matching against: ', itemMatch)
+            debugEntry('Key            : ', plainKey)
+            debugEntry('Matching against: ', itemMatch)
 
             if (plainKey.indexOf(itemMatch) === 0) {
               if (!result || result.length > plainKey.length) {
                 result = plainKey
-                debug('MATCHED: ', plainKey)
+                debugEntry('MATCHED: ', plainKey)
               }
             }
             resolve()
@@ -1169,18 +1171,21 @@ class SafeContainer {
   }
 
   /** File system operation results cache
+
+    These functions are called by the container's NfsContainerFiles object
+    rather than by the container itself, because that implements the file
+    operations.
   */
-  async _handleCacheForCreateFile (itemPath) {
-    await this._handleCacheListFolderAddItem(itemPath)
-    let parentDir = u.parentPath(itemPath)
-    if (parentDir) this._clearResultForPath('itemAttributes', itemPath)
+  async _handleCacheForCreateFileOrOpenWrite (itemPath) {
+    // File creation sets up itemAttributes for the new file, so leave that in place
+    // Only need to handle listFolder here:
+    await this._clearResultForPath('listFolder', u.parentPathNoDot(itemPath))
+    if (this._parent) await this._parent._handleCacheForCreateFileOrOpenWrite(this._makeItemPathForParent(itemPath))
   }
 
   async _handleCacheForDelete (itemPath) {
     await this._handleCacheListFolderRemoveItem(itemPath)
     this._clearResultForPath('itemAttributes', itemPath)
-    let parentDir = u.parentPath(itemPath)
-    if (parentDir !== itemPath) await this._handleCacheForDelete(parentDir) // Recurse to clear all parent folders
 
     // Parent container has a cache too:
     // TODO when containers have multiple parents, make this iterate over _parents[]
@@ -1190,12 +1195,13 @@ class SafeContainer {
   async _handleCacheForRename (itemPath, newItemPath) {
     // Handle create before delete, otherwise the handle delete may wrongly
     // act on directory becoming empty
-    await this._handleCacheForCreateFile(newItemPath)
-    await this._handleCacheForDeleteFile(itemPath)
+    await this._handleCacheForCreateFileOrOpenWrite(newItemPath)
+    await this._handleCacheForDelete(itemPath)
+    // No need to call _handleCacheForRename() on _parent (above already call parent)
   }
 
   async _handleCacheListFolderAddItem (itemPath) {
-    let folderPath = u.parentPath(itemPath)
+    let folderPath = u.parentPathNoDot(itemPath)
     let itemName = u.itemPathBasename(itemPath)
 
     try {
@@ -1211,7 +1217,7 @@ class SafeContainer {
   }
 
   async _handleCacheListFolderRemoveItem (itemPath) {
-    let folderPath = u.parentPath(itemPath)
+    let folderPath = u.parentPathNoDot(itemPath)
     let itemName = u.itemPathBasename(itemPath)
 
     try {
@@ -1233,12 +1239,12 @@ class SafeContainer {
 
   _handleCacheForChangedAttributes (itemPath) {
     this._clearResultForPath('itemAttributes', itemPath)
-    let parentDir = u.parentPath(itemPath)
+    let parentDir = u.parentPathNoDot(itemPath)
     if (parentDir !== itemPath) this._clearResultForPath('itemAttributes', parentDir)
   }
 
   _clearResultForPath (fileOperation, itemPath) {
-    if (itemPath === '.') itemPath = ''
+    if (itemPath === '.') { throw new Error('TODO remove this unless it fires! In which case fix that cos it shouldn\'t') }
 
     debug('%s._clearResultForPath(%s, %s)', this.constructor.name, fileOperation, itemPath)
     let resultsHolder = this._resultHolderMap[itemPath]
@@ -1734,7 +1740,7 @@ class NfsContainer extends SafeContainer {
   async initialiseNfs () {
     if (!this._nfs) {
       this._nfs = await this._mData.emulateAs('NFS')
-      this._files = new NfsContainerFiles(this._safeJs, this._mData, this._nfs)
+      this._files = new NfsContainerFiles(this, this._safeJs, this._mData, this._nfs)
     }
     return this._nfs
   }
@@ -1955,7 +1961,7 @@ class NfsContainer extends SafeContainer {
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
-      return this._files.openFile(itemPath, nfsFlags)
+      return await this._files.openFile(itemPath, nfsFlags)
     } catch (e) {
       debug(e.message)
     }
@@ -1965,7 +1971,6 @@ class NfsContainer extends SafeContainer {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     let result
     try {
-      this._handleCacheForChangedAttributes(itemPath)
       result = await this._files.createFile(itemPath)
       // This is ugly.
       // After createFile(), but before closeFile() we fake the file's existence
@@ -2006,7 +2011,6 @@ class NfsContainer extends SafeContainer {
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
-      if (this._files.isWriteable(itemPath, fd)) this._handleCacheForChangedAttributes(itemPath)
       return this._files.closeFile(itemPath, fd)
     } catch (e) {
       debug(e.message)
@@ -2016,9 +2020,7 @@ class NfsContainer extends SafeContainer {
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     try {
-      let result = this._files.deleteFile(itemPath)
-      if (result) await this._handleCacheForDelete(itemPath)
-      return result
+      return this._files.deleteFile(itemPath)
     } catch (e) {
       debug(e.message)
     }
@@ -2050,7 +2052,6 @@ class NfsContainer extends SafeContainer {
       if (itemPath === trimmedNewPath) return // Rename to self so do nothing
 
       await this._files.moveFile(itemPath, trimmedNewPath)
-      this._handleCacheForChangedAttributes(itemPath, newItemPath)
       return true
     } catch (e) {
       debug(e)
@@ -2082,7 +2083,6 @@ class NfsContainer extends SafeContainer {
    */
   async setFileMetadata (itemPath, fd, metadata) {
     try {
-      this._handleCacheForChangedAttributes(itemPath)
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
       debug(e.message)
