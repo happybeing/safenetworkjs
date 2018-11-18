@@ -12,6 +12,7 @@ require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
 const debug = require('debug')('safenetworkjs:containers')
 const debugEntry = require('debug')('safenetworkjs:container-entries')
+const debugCache = require('debug')('safenetworkjs:cache')
 
 const u = require('./safenetwork-utils')
 const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
@@ -36,7 +37,8 @@ const containerTypeCodes = {
   deletedEntry: 'deleted-entry',    // entry exists, but value has been deleted()
   servicesContainer: 'services-container',  // Services container for a public name
   service: 'service',               // Services container for a public name
-  notFound: 'not-found',
+  childContainerItem: 'child-container-item', // Need to get type from child container
+  notFound: 'not-found',            // Item not found in container
   notValid: 'not-valid'
 }
 
@@ -46,6 +48,8 @@ const containerTypeCodes = {
  * @return {Boolean} true if the type should have cached results
  */
 function isCacheableResult (fileOperation, operationResult) {
+  if (process.env.SAFENETWORKJS_CACHE === 'disable') return false
+
   if (fileOperation === 'itemAttributes') {
     let containerType = operationResult.entryType
     return containerType === containerTypeCodes.defaultContainer ||
@@ -166,11 +170,127 @@ class SafeContainer {
     this._containerPath = containerPath + (u.isFolder(containerPath, '/') ? '' : '/')
     if (!subTree) subTree = ''
     this._subTree = subTree + (subTree.length && !u.isFolder(subTree, '/') ? '/' : '')
-    this._parent = (parent === undefined ? undefined : parent)
-    this._parentEntryKey = (parentEntryKey === undefined ? undefined : parentEntryKey)
-    this._tagType = (tagType === undefined ? undefined : tagType)
+    this._parent = parent
+    this._parentEntryKey = parentEntryKey
+    this._tagType = tagType
+
+    /**
+     * File System Results Cache
+     *
+     * Each container maintains a cache of the last result for certain file
+     * operations, such as itemAttributes.
+     *
+     * This is implemented using indirection, so that the cache can be accessed
+     * modified and cleared by external processes, and not just the container
+     * itself.
+     *
+     * Indirection allows a single cached result to be accessed and relied
+     * upon by clients, including the parent container which caches results
+     * that it supplies, while also being able to access the cached results
+     * that come from a child container (e.g. parent as a default container
+     * such as `_public`, child as an NFS container accessed via `_public`)
+     *
+     * Indirection is available through 'ResultsRef' objects, which are
+     * obtained by a client process (or parent container accessing a child)
+     * using the 'ResultsRef' version of an access function. So where
+     * caching is supported there will be both a simple access function
+     * such as itemAttributes() and an itemAttributesResultsRef() alternative
+     * which returns the same result, but wrapped as a ResultsRef.
+     *
+     * Currently caching is supported by both variants, but neither use
+     * the cache. So a process wanting to access cached values must do
+     * this by keeping track of ResultsRef objects and using the value
+     * from that when available, and if not, then executing the file
+     * operation instead.
+     *
+     * ResultsRef
+     * All containers keep their own map of ResultsRef objects, and if
+     * a container has a child, this allows it to support caching even
+     * if it isn't the source of the cached result.
+     *
+     * Each ResultsRef object contains a reference to a second object, a
+     * resultsMap, and the key to use when looking up a result in that
+     * resultsMap. The lookup returns a ResultHolder object, which contains
+     * up to one object per file operation at a filesystem location.
+     *
+     * So to lookup the cached result for itemAttributes(itemPath) is in essence:
+     *    let resultsRef = this._resultsRefMap[itemPath]
+     *    if (resultsRef) resultHolder = resultsRef.resultsMap[resultsRef.resultsKey]
+     *    if (resultHolder) result = resultHolder['itemAttributes']
+     *
+     * The 'key' identifies the filesystem location (itemPath) relative to the
+     * container which owns the resultsMap.
+     *
+     * ResultHolder
+     * Each ResultHolder contains one or more results for a given location
+     * mapped by the name of the filesystem operation.
+     *
+     * So resultHolder['itemAttributes'] returns the value that was last
+     * returned by itemAttributes() for a given location (the key used to
+     * look up the resultHolder in the resultsRefMap).
+     *
+     * A client process can safely add information to the resultHolder to
+     * save regenerating it from the result each time it accesses the cache.
+     * So, for example, FUSE getattr() uses the result from itemAttributes()
+     * to create the result for getatter(), and can cache this by assigning
+     * it to the ResultHolder, as `resultHolder['getattr'] = fuseResult`. It
+     * can do this, because if anything needs to invalidate the cached result
+     * it will delete the resultHolder object, and all users of the object
+     * such as a client process, or a parent container, will find that it
+     * no longer exists when they try to access it.
+     *
+     * So, to summarise:
+     * - a client wanting to use caching, calls 'ResultsRef' methods
+     *   such as itemAttributesResultsRef() rather than itemAttributes().
+     *   Note that itemAttributes() itself uses itemAttributesResultsRef(),
+     *   so it is ok to mix the two. Calling itemAttributes() still
+     *   creates or updates the cached ResultHolder, it just doesn't
+     *   return a ResultsRef.
+     *
+     * - the client must keep track of the ResultsRefs it obtains, and
+     *   can use them to obtain the ResultHolder for a location (itemPath).
+     *   To do so, a client (including a parent container in SafenetworkJs)
+     *   keeps a resultsRefMap, and can look up a ResultsRef using
+     *   resultsRefMap[itemPath]. It then uses resultsRef.resultsMap and
+     *   resultsRef.resultsKey to obtain the ResultHolder for that itemPath.
+     *
+     * - anyone with a ResultHolder (client, parent container etc) can
+     *   invalidate a cached result by deleting the ResultHolder (clearing
+     *   all file operation results), or deleting a specific file operation
+     *   result from a ResultHolder.
+     *
+     *    So either:  `delete resultMap[resultsKey]`
+     *    Or:         `delete resultHolder['itemAttributes']`
+     *
+     * NOTES:
+     *   At the present time, the cache is NOT used by SafenetworkJs
+     *   operations. So if you call a SafenetworkJs operation it will always
+     *   access the SAFE API, and ignore any cached results. This may change
+     *   in future, possibly on an opt-in basis (i.e by the application
+     *   requesting the cache be used in order to speed things up with
+     *   minimum effort by the application itself).
+     */
+
+    /**
+     * Map of itemPath to resultsRef
+     *
+     * Looked up using an itemPath, the resultsRef for holds:
+     *  - resultsMap  // SafenetworkJs' map of results for a given container key
+     *  - key         // The key to look up the relevant resultsHolder
+     *
+     * @type {Array}
+     */
+    this._resultsRefMap = []   // Maintained by ResultsRef functions, e.g. itemAttributesResultsRef()
 
     this._resultHolderMap = [] // Filesystem results cached by operation and container key
+                               // Cache result holder objects are accessible to user app
+                               // through <fileOperation>ResultsRef() functions, but not
+                               // used internally yet.
+                               // For cached operations, if a container obtains the result
+                               // from a child, it uses the child's ResultsRef function to
+                               // obtain the resultHolder, and uses that. So there will
+                               // only ever be one resultHolder per path, used by both
+                               // the parent and child container.
   }
 
   /**
@@ -534,11 +654,11 @@ class SafeContainer {
    * @param  {String}  folderPath
    * @return {Promise}    list of file and folder names in the folder
    */
-  async listFolder (itemPath) {
-    debug('%s.listFolder(\'%s\')', this.constructor.name, itemPath)
+  async listFolder (folderPath) {
+    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
     try {
-      let resultsRef = await this.listFolderResultsRef(itemPath)
+      let resultsRef = await this.listFolderResultsRef(folderPath)
       if (resultsRef) return resultsRef.result
     } catch (e) {
       debug(e)
@@ -548,7 +668,8 @@ class SafeContainer {
   async listFolderResultsRef (folderPath) {
     debug('%s.listFolderResulsRef(\'%s\')', this.constructor.name, folderPath)
 
-    let listing = []
+    let listing = []  // Result from this container
+    let resultsRef    // Set if result obtained from child container
     try {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
@@ -608,9 +729,9 @@ class SafeContainer {
               let matchedChild = await this._getContainerForKey(plainKey)
               let subFolder = folderMatch.substring(plainKey.length)
               if (subFolder[0] === '/') subFolder = subFolder.substring(1)
-              let childList = await matchedChild.listFolder(subFolder)
-              listing = listing.concat(childList)
-              debugEntry('%s.listing-3: %o', constructor.name, listing)
+              // As it's the child, call listFolderResultsRef() to use its cache
+              resultsRef = await matchedChild.listFolderResultsRef(subFolder)
+              debugEntry('%s.listing-3: %o', constructor.name, resultsRef.resultsMap[resultsRef.resultsKey]['listFolder'])
             }
             resolve() // Resolve the entry's promise
           }).catch((e) => debug(e.message)))
@@ -623,99 +744,27 @@ class SafeContainer {
       debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
-    debugEntry('%s.listing-5-END: %o', constructor.name, listing)
-    return this._updateResultForPath(folderPath, 'listFolder', listing)
-  }
-
-  async listFolder_FIRSTATTEMPT (folderPath) {
-    debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
-
-    let listing = []
-    try {
-      // TODO remove debug calls (and comment out the value parts until moved elsewhere)
-      // TODO if a defaultContainer check cache against sub-paths of folderPath (longest first)
-      // Only need to check container entries if that fails
-
-      // In some cases the name of the container appears at the start
-      // of the key (e.g. '/_public/happybeing/root-www').
-      // In other such as an NFS container it is just the file name
-      // or possibly a path which could container directory separators
-      // such as 'index.html' or 'images/profile-picture.png'
-
-      // We add this._subTree to the front of the path
-      let folderMatch = this._subTree + folderPath
-
-      // For matching we ignore a trailing '/' so remove if present
-      folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
-
-      // TODO remove safe-node-app v0.8.1 code:
-      // TODO revert to safe-node-app v0.9.1 code:
-      let listingQ = []
-      // TODO remove safe-node-app v0.8.1 code:
-      let entries = await this._mData.getEntries()
-      entries.forEach(async (key, val) => {
-        listingQ.push(new Promise(async (resolve, reject) => {
-          let decodedEntry = await this._decodeEntry081(key, val)
-
-      // TODO revert to safe-node-app v0.9.1 code:
-      // let entries = await this._mData.getEntries()
-      // let entriesList = await entries.listEntries()
-      // entriesList.forEach(async (entry) => {
-        // listingQ.push(new Promise(async (resolve, reject) => {
-        //   let decodedEntry = await this._decodeEntry(entry)
-          let plainKey = decodedEntry.plainKey
-
-        // For matching we ignore a trailing '/' so remove if present
-          let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
-          debug('Match Key      : ', matchKey)
-          debug('Folder Match   : ', folderMatch)
-          // Some containers don't list all entries (e.g. if they holdd metadata)
-          if (this.isHiddenEntry(plainKey)) {
-            resolve()
-            return // Skip this one
-          }
-
-          if (folderMatch === '') { // Check if the folderMatch is root of the key
-            // Item is the first part of the path
-            let item = plainKey.split('/')[0]
-            if (item && item.length && listing.indexOf(item) === -1) {
-              debug('listing-1.push(\'%s\')', item)
-              listing.push(item)
-            }
-          } else if (plainKey.indexOf(folderMatch) === 0 && plainKey.length > folderMatch.length) {
-            // As the folderMatch is at the start of the key, and *shorter*,
-            // item is the first part of the path after the folder (plus a '/')
-            let item = plainKey.substring(folderMatch.length).split('/')[1]
-            if (item && item.length && listing.indexOf(item) === -1) {
-              debug('listing-2.push(\'%s\')', item)
-              listing.push(item)
-            }
-          } else if (folderMatch.indexOf(plainKey) === 0) {
-            // We've matched the key of a child container, so pass to child
-            let matchedChild = await this._getContainerForKey(plainKey)
-            let subFolder = folderMatch.substring(plainKey.length)
-            if (subFolder[0] === '/') subFolder = subFolder.substring(1)
-            let childList = await matchedChild.listFolder(subFolder)
-            listing = listing.concat(childList)
-            debug('%s.listing-3: %o', constructor.name, listing)
-          }
-          resolve() // Resolve the entry's promise
-        }).catch((e) => debug(e.message)))
-      })
-      await Promise.all(listingQ).catch((e) => debug(e.message))
-      debug('%s.listing-4-END: %o', constructor.name, listing)
-      return listing
-    } catch (e) {
-      debug(e.message)
-      debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
+    if (!resultsRef) {
+      debugEntry('%s.listing-6-END: %o', constructor.name, listing)
+      resultsRef = this._cacheResultForPath(folderPath, 'listFolder', listing)
     }
-
-    debug('%s.listing-5-END: %o', constructor.name, listing)
-    return listing
+    return resultsRef
   }
 
-  async callFunctionOnItem (itemPath, functionName, p2, p3, p4, p5) {
-    debug('%s.callFunctionOnItem(%s, %s, p2, p3, p4, p5)', this.constructor.name, itemPath, functionName)
+  /**
+   * Call functionName on self or child container (if exact match of entry key)
+   * @private
+   *
+   * @param  {String}  itemPath
+   * @param  {String}  functionName
+   * @param  {Unknown}  p2        [optional] parameter for functionName
+   * @param  {Unknown}  p3
+   * @param  {Unknown}  p4
+   * @param  {Unknown}  p5
+   * @return {Promise}
+   */
+  async _callFunctionOnItem (itemPath, functionName, p2, p3, p4, p5) {
+    debug('%s._callFunctionOnItem(%s, %s, p2, p3, p4, p5)', this.constructor.name, itemPath, functionName)
 
     let result
     try {
@@ -794,13 +843,13 @@ class SafeContainer {
       })
       await Promise.all(entryQ).catch((e) => debug(e.message))
       if (result === undefined) {
-        debug('WARNING: %s.callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
+        debug('WARNING: %s._callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
         result = containerTypeCodes.notFound
       }
-      debug('%s.call returning result: %o', constructor.name, result)
+      debug('%s.call returning result: %o', constructor.name, result.result)
       return result
     } catch (e) {
-      debug('ERROR: %s.callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
+      debug('ERROR: %s._callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
       debug(e.message)
     }
   }
@@ -820,7 +869,7 @@ class SafeContainer {
         }
       } else {
         // Pass to the child container
-        return this.callFunctionOnItem(itemPath, 'itemInfo')
+        return this._callFunctionOnItem(itemPath, 'itemInfo')
       }
     } catch (error) { debug(error.message) }
   }
@@ -858,8 +907,10 @@ class SafeContainer {
             type = containerTypeCodes.nfsContainer
           }
         } else {
-          // Attempt to call itemType on a child container
-          type = await this.callFunctionOnItem(itemPath, 'itemType')
+          type = containerTypeCodes.childContainerItem
+          // TODO delete old code:
+          // WAS:// Attempt to call itemType on a child container
+          // type = await this._callFunctionOnItem(itemPath, 'itemType')
         }
       }
     } catch (error) {
@@ -923,19 +974,20 @@ class SafeContainer {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
       debug(e)
     }
   }
 
-  async itemAttributesResultRef (itemPath, fd) {
-    debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
+  async itemAttributesResultsRef (itemPath, fd) {
+    debug('%s.itemAttributesResultsRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
 
     const now = Date.now()
     let result
+    let resultsRef  // Will be set if result is from child (and so cached by child)
     try {
       if (this.isSelf(itemPath)) {
         debug('%s is type: %s', itemPath, containerTypeCodes.defaultContainer)
@@ -958,13 +1010,14 @@ class SafeContainer {
         if (type === containerTypeCodes.file ||
             type === containerTypeCodes.nfsContainer ||
             type === containerTypeCodes.service ||
-            type === containerTypeCodes.servicesContainer) {
+            type === containerTypeCodes.servicesContainer ||
+            type === containerTypeCodes.childContainerItem) {
           debug('%s is type: %s', itemPath, type)
-          result = await this.callFunctionOnItem(itemPath, 'itemAttributes')
+          resultsRef = await this._callFunctionOnItem(itemPath, 'itemAttributesResultsRef')
         }
       }
 
-      if (!result) {
+      if (!result && !resultsRef) {
         if (type === containerTypeCodes.fakeContainer) {
           // Fake container
           debug('%s is type: %s', itemPath, containerTypeCodes.fakeContainer)
@@ -986,15 +1039,18 @@ class SafeContainer {
       debug(e.message)
       throw e
     }
+    if (!resultsRef) {
+      resultsRef = this._cacheResultForPath(itemPath, fileOperation, result)
+    }
 
-    return this._updateResultForPath(itemPath, fileOperation, result)
+    return resultsRef
   }
 
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'openFile', nfsFlags)
+      return await this._callFunctionOnItem(itemPath, 'openFile', nfsFlags)
     } catch (e) { debug(e.message) }
   }
 
@@ -1002,7 +1058,7 @@ class SafeContainer {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'createFile')
+      return await this._callFunctionOnItem(itemPath, 'createFile')
     } catch (e) { debug(e.message) }
   }
 
@@ -1010,30 +1066,47 @@ class SafeContainer {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'closeFile', fd)
+      return await this._callFunctionOnItem(itemPath, 'closeFile', fd)
     } catch (e) {
       debug(e.message)
     }
   }
 
+  /**
+   * delete a file
+   *
+   * @param  {String}  itemPath
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
+   */
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'deleteFile')
+      return await this._callFunctionOnItem(itemPath, 'deleteFile')
     } catch (e) {
       debug(e.message)
     }
+    return { result: false }
   }
 
+  /**
+   * rename a file and/or move between paths within this container
+   *
+   * @param  {String}  itemPath
+   * @param  {String}  newItemPath
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
+   */
   async renameFile (itemPath, newItemPath) {
     debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'renameFile', newItemPath)
+      return await this._callFunctionOnItem(itemPath, 'renameFile', newItemPath)
     } catch (e) {
       debug(e.message)
     }
+    return { result: false }
   }
 
   /**
@@ -1045,7 +1118,7 @@ class SafeContainer {
   async getFileMetadata (itemPath, fd) {
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'getFileMetadata', fd)
+      return await this._callFunctionOnItem(itemPath, 'getFileMetadata', fd)
     } catch (e) { debug(e.message) }
   }
 
@@ -1060,7 +1133,7 @@ class SafeContainer {
   async setFileMetadata (itemPath, fd, metadata) {
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'setFileMetadata', fd, metadata)
+      return await this._callFunctionOnItem(itemPath, 'setFileMetadata', fd, metadata)
     } catch (e) { debug(e.message) }
   }
 
@@ -1070,7 +1143,7 @@ class SafeContainer {
     debug('%s.readFile(\'%s\', %o, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
+      return await this._callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
     } catch (e) { debug(e.message) }
   }
 
@@ -1080,7 +1153,7 @@ class SafeContainer {
     debug('%s.readFileBuf(\'%s\', %o, buf, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
+      return await this._callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
     } catch (e) {
       debug(e.message)
     }
@@ -1106,7 +1179,7 @@ class SafeContainer {
     debug('%s.writeFile(\'%s\', %s, ...)', this.constructor.name, itemPath, fd)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'writeFile', fd, content)
+      return await this._callFunctionOnItem(itemPath, 'writeFile', fd, content)
     } catch (e) {
       debug(e.message)
     }
@@ -1134,7 +1207,7 @@ class SafeContainer {
 
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len)
+      return await this._callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len)
     } catch (e) {
       debug(e.message)
     }
@@ -1164,7 +1237,7 @@ class SafeContainer {
     try {
       if (size !== 0) throw new Error('truncateFile() not implemented for size other than zero')
       // Default is a container of containers, not files so pass to child container
-      return await this.callFunctionOnItem(itemPath, '_truncateFile', fd, size)
+      return await this._callFunctionOnItem(itemPath, '_truncateFile', fd, size)
     } catch (e) {
       debug(e.message)
     }
@@ -1176,33 +1249,36 @@ class SafeContainer {
     rather than by the container itself, because that implements the file
     operations.
   */
-  async _handleCacheForCreateFileOrOpenWrite (itemPath) {
+
+  _handleCacheForCreateFileOrOpenWrite (itemPath) {
     // File creation sets up itemAttributes for the new file, so leave that in place
     // Only need to handle listFolder here:
-    await this._clearResultForPath('listFolder', u.parentPathNoDot(itemPath))
-    if (this._parent) await this._parent._handleCacheForCreateFileOrOpenWrite(this._makeItemPathForParent(itemPath))
+    this._clearResultForPath(u.parentPathNoDot(itemPath), 'listFolder')
   }
 
+  /**
+   * update cache when an item has been deleted
+   *
+   * @param  {String}  itemPath
+   * @return {Promise} true, if the item was the last in its parent folder
+   */
   async _handleCacheForDelete (itemPath) {
-    await this._handleCacheListFolderRemoveItem(itemPath)
-    this._clearResultForPath('itemAttributes', itemPath)
-
-    // Parent container has a cache too:
-    // TODO when containers have multiple parents, make this iterate over _parents[]
-    if (this._parent) await this._parent._handleCacheForDelete(this._makeItemPathForParent(itemPath))
+    let wasLastItem = await this._handleCacheListFolderRemoveItem(itemPath)
+    this._clearResultForPath(itemPath, '*')
+    return wasLastItem
   }
 
   async _handleCacheForRename (itemPath, newItemPath) {
     // Handle create before delete, otherwise the handle delete may wrongly
     // act on directory becoming empty
-    await this._handleCacheForCreateFileOrOpenWrite(newItemPath)
+    this._handleCacheForCreateFileOrOpenWrite(newItemPath)
     await this._handleCacheForDelete(itemPath)
-    // No need to call _handleCacheForRename() on _parent (above already call parent)
   }
 
   async _handleCacheListFolderAddItem (itemPath) {
     let folderPath = u.parentPathNoDot(itemPath)
     let itemName = u.itemPathBasename(itemPath)
+    let thing; thing.bang() // TODO IS THIS USED?
 
     try {
       let listFolderResult
@@ -1216,11 +1292,18 @@ class SafeContainer {
     } catch (e) { debug(e) }
   }
 
+  /**
+   * update cache when an item has been deleted
+   *
+   * @param  {String}  itemPath
+   * @return {Promise} true, if the item was the last in its parent folder
+   */
   async _handleCacheListFolderRemoveItem (itemPath) {
-    let folderPath = u.parentPathNoDot(itemPath)
-    let itemName = u.itemPathBasename(itemPath)
-
+    let wasLastItem = true
     try {
+      let folderPath = u.parentPathNoDot(itemPath)
+      let itemName = u.itemPathBasename(itemPath)
+
       let listFolderResult
       let resultsHolder = this._resultHolderMap[folderPath]
       if (resultsHolder) listFolderResult = resultsHolder['listFolder']
@@ -1234,32 +1317,50 @@ class SafeContainer {
       if (itemIndex > -1) {
         listFolderResult.splice(itemIndex, 1)
       }
+      wasLastItem = listFolderResult.length === 0
+      if (wasLastItem) {
+        // When a folder becomes empty, it disappears and that may
+        // cause its parent to become empty, and so on. So as a
+        // precaution, we clear the cache for it and all parent folders
+        this._clearCacheAlongWholePath(folderPath)
+      }
     } catch (e) { debug(e) }
+
+    return wasLastItem
   }
 
   _handleCacheForChangedAttributes (itemPath) {
-    this._clearResultForPath('itemAttributes', itemPath)
-    let parentDir = u.parentPathNoDot(itemPath)
-    if (parentDir !== itemPath) this._clearResultForPath('itemAttributes', parentDir)
+    this._clearResultForPath(itemPath, 'itemAttributes')
   }
 
-  _clearResultForPath (fileOperation, itemPath) {
-    if (itemPath === '.') { throw new Error('TODO remove this unless it fires! In which case fix that cos it shouldn\'t') }
-
-    debug('%s._clearResultForPath(%s, %s)', this.constructor.name, fileOperation, itemPath)
+  /**
+   * clear cached result for fileOperation(s) at a given path
+   * @private
+   *
+   * @param  {String} itemPath
+   * @param  {String} name of operation (e.g. 'itemAttributes') or '*' to clear all
+   */
+  _clearResultForPath (itemPath, fileOperation) {
+    debug('%s._clearResultForPath(%s, %s)', this.constructor.name, itemPath, fileOperation)
     let resultsHolder = this._resultHolderMap[itemPath]
-    if (resultsHolder && resultsHolder[fileOperation]) {
-      delete resultsHolder[fileOperation]
+    if (resultsHolder) {
+      if (fileOperation === '*') {
+        let operations = Object.keys(resultsHolder)
+        for (let i = 0, len = operations.length; i < len; i++) {
+          delete resultsHolder[operations[i]]
+        }
+      } else if (resultsHolder[fileOperation]) {
+        delete resultsHolder[fileOperation]
+      }
     }
-    // Parent container has a cache too:
-    // TODO when containers have multiple parents, make this iterate over _parents[]
-    if (this._parent) this._parent._clearResultForPath(fileOperation, this._makeItemPathForParent(itemPath))
   }
 
-  _makeItemPathForParent (itemPath) {
-    let pathPrefix = this._parent._subTree
-    if (this._subTree[0] === '/') pathPrefix = this._parent.substring(1)
-    return this._containerPath.substring(pathPrefix.length) + itemPath
+  _clearCacheAlongWholePath (itemPath) {
+    let nextDir = itemPath
+    while (nextDir !== '') {
+      this._clearResultForPath(nextDir, '*')
+      nextDir = this._safeJs.parentPathNoDot(nextDir)
+    }
   }
 
   _getResultHolderForPath (itemPath) {
@@ -1271,10 +1372,31 @@ class SafeContainer {
     return resultHolder
   }
 
+  // Used when storing a result cached in this container
+  _getResultsRefForPath (itemPath) {
+    let resultsRef = this._resultsRefMap[itemPath]
+    if (!resultsRef) {
+      resultsRef = {
+        resultsMap: this._resultHolderMap,
+        resultsKey: itemPath
+      }
+      this._resultsRefMap[itemPath] = resultsRef
+    }
+    return resultsRef
+  }
+
+  // Used when storing result cached elsewhere (e.g. in child container)
+  _setResultsRefForPath (itemPath, resultsRef) {
+    this._resultsRefMap[itemPath] = resultsRef
+  }
+
   /**
-   * Update _resultHolderMap and return a resultsRef
+   * Update cache result/clear cache result, and return a ResultsRef object
+   *
+   * Creates or updates ResultHolder, _resultHolderMap, _resultsRefMap
    *
    * NOTE: changes here need to be reflected in safetwork-fuse RootContainer
+   * TODO better to change RootContainer so it extends SafeContainer
    *
    * @param  {String} itemPath
    * @param  {String} fileOperation
@@ -1282,25 +1404,32 @@ class SafeContainer {
    * @param  {Boolean} cacheTheResult [optional] if false, clears cache rather than updates
    * @return {Object} A 'resultsRef' which has the result, its cache location
    */
-  _updateResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
-    debug('%s._updateResultForPath(%s, %s, %o, %o)', this.constructor.name, itemPath, fileOperation, operationResult, cacheTheResult)
+  _cacheResultForPath (itemPath, fileOperation, operationResult, cacheTheResult) {
+    debug('%s._cacheResultForPath(%s, %s, %o, %o)', this.constructor.name, itemPath, fileOperation, operationResult, cacheTheResult)
     if (cacheTheResult === undefined) cacheTheResult = true
-    cacheTheResult = cacheTheResult && process.env.SAFENETWORKJS_CACHE !== 'disable'
 
     // Caller wants it cached, but also check if it is cacheable
     if (cacheTheResult && isCacheableResult(fileOperation, operationResult)) {
       let resultHolder = this._getResultHolderForPath(itemPath)
       resultHolder[fileOperation] = operationResult
     } else {
-      this._clearResultForPath(fileOperation, itemPath)
+      this._clearResultForPath(itemPath, fileOperation)
     }
 
-    // Return a resultsRef
-    return {
-      resultsMap: this._resultHolderMap,
-      resultsKey: itemPath,
-      result: operationResult,
-      'fileOperation': fileOperation  // For debugging only
+    this._debugListCache()
+
+    let resultsRef = this._getResultsRefForPath(itemPath)
+    resultsRef.result = operationResult // Needed because not all results are cached
+    return resultsRef
+  }
+
+  _debugListCache () {
+    if (!process.env.DEBUG) return
+
+    debugCache('%s._debugListCache()...', this.constructor.name)
+    let keys = Object.keys(this._resultsRefMap)
+    for (let i = 0, len = keys.length; i < len; i++) {
+      debugCache('%s: %o', keys[i], (this._resultsRefMap[keys[i]].resultsMap)[this._resultsRefMap[keys[i]].resultsKey])
     }
   }
 }
@@ -1419,8 +1548,10 @@ class PublicNamesContainer extends SafeContainer {
         // itemPath exact match with entry key, so determine entry type from the key
         type = this._entryTypeOf(itemKey)
       } else {
-        // Attempt to call itemType on a child container
-        type = await this.callFunctionOnItem(itemPath, 'itemType')
+        type = containerTypeCodes.childContainerItem
+        // TODO delete old code:
+        // WAS:// Attempt to call itemType on a child container
+        // type = await this._callFunctionOnItem(itemPath, 'itemType')
       }
     } catch (error) {
       type = containerTypeCodes.notValid
@@ -1539,8 +1670,10 @@ class ServicesContainer extends SafeContainer {
       } else if (this.isSelf(itemPath)) {
         type = containerTypeCodes.servicesContainer
       } else {
-        // Attempt to call itemType on a child container
-        type = await this.callFunctionOnItem(itemPath, 'itemType')
+        type = containerTypeCodes.childContainerItem
+        // TODO delete old code:
+        // WAS:// Attempt to call itemType on a child container
+        // type = await this._callFunctionOnItem(itemPath, 'itemType')
       }
       // TODO test the above four lines of code with services that
       //      don't have an NFS container as their value, to see if
@@ -1555,7 +1688,7 @@ class ServicesContainer extends SafeContainer {
       //   if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
       //     // Service with container, so pass to child
       //     debug('%s has a container: %s', itemPath, type)
-      //     return await this.callFunctionOnItem(itemPath, 'itemType')
+      //     return await this._callFunctionOnItem(itemPath, 'itemType')
       //   }
     } catch (error) {
       type = containerTypeCodes.notValid
@@ -1580,7 +1713,7 @@ class ServicesContainer extends SafeContainer {
         let serviceProperties = this._safeJs.decodeServiceKey(itemPath)
         if (serviceProperties && this._isContainerService(serviceProperties.name)) {
           // Pass to the child container
-          return this.callFunctionOnItem(itemPath, 'itemInfo')
+          return this._callFunctionOnItem(itemPath, 'itemInfo')
         } else {
           debug('Unrecognised service: ', itemPath)
         }
@@ -1598,19 +1731,20 @@ class ServicesContainer extends SafeContainer {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
       debug(e)
     }
   }
 
-  async itemAttributesResultRef (itemPath) {
-    debug('%s.itemAttributesResultRef(\'%s\')', this.constructor.name, itemPath)
+  async itemAttributesResultsRef (itemPath) {
+    debug('%s.itemAttributesResultsRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
 
     let type
     let result
+    let resultsRef  // Will be set if result is from child container (and so uses child's cache)
     const now = Date.now()
     try {
       if (this.isSelf(itemPath)) {
@@ -1635,7 +1769,7 @@ class ServicesContainer extends SafeContainer {
         if (serviceProperties && this._isContainerService(serviceProperties.serviceId)) {
           // Service with container, so pass to child
           debug('%s has a container: %s', itemPath, type)
-          result = await this.callFunctionOnItem(itemPath, 'itemAttributes')
+          resultsRef = await this._callFunctionOnItem(itemPath, 'itemAttributesResultsRef')
         }
       }
 
@@ -1658,7 +1792,11 @@ class ServicesContainer extends SafeContainer {
       debug(e.message)
     }
 
-    return this._updateResultForPath(itemPath, fileOperation, result)
+    if (!resultsRef) {
+      resultsRef = this._cacheResultForPath(itemPath, fileOperation, result)
+    }
+
+    return resultsRef
   }
 }
 
@@ -1791,7 +1929,7 @@ class NfsContainer extends SafeContainer {
         }
       } else {
         // Pass to the child container
-        return this.callFunctionOnItem(itemPath, 'itemInfo')
+        return this._callFunctionOnItem(itemPath, 'itemInfo')
       }
     } catch (error) { debug(error.message) }
   }
@@ -1852,7 +1990,7 @@ class NfsContainer extends SafeContainer {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultRef(itemPath, fd)
+      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
       debug(e)
@@ -1865,8 +2003,8 @@ class NfsContainer extends SafeContainer {
    * @param  {Number}  fd       [optional] file descriptor (if file is open)
    * @return {Promise}          object containing result plus resultsMap, resultsKey for looking up a resultHolder
    */
-  async itemAttributesResultRef (itemPath, fd) {
-    debug('%s.itemAttributesResultRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
+  async itemAttributesResultsRef (itemPath, fd) {
+    debug('%s.itemAttributesResultsRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileOperation = 'itemAttributes'
 
     // Look for a cached resultsRef
@@ -1908,7 +2046,11 @@ class NfsContainer extends SafeContainer {
         }
 
         if (fileState) {
-          type = containerTypeCodes.file
+          if (fileState.isDeletedFile()) {
+            type = containerTypeCodes.deletedEntry
+          } else {
+            type = containerTypeCodes.file
+          }
         } else {
           type = await this.itemType(itemPath)
         }
@@ -1935,7 +2077,7 @@ class NfsContainer extends SafeContainer {
             'isFile': false,
             entryType: type
           }
-        } else {
+        } else if (type === containerTypeCodes.fakeContainer) {
           // Fake container
           // Default values (used as is for containerTypeCodes.nfsContainer)
           result = {
@@ -1947,6 +2089,8 @@ class NfsContainer extends SafeContainer {
             'isFile': false,
             entryType: type
           }
+        } else {
+          throw new Error('Unexpected itemType: ' + type)
         }
       }
     } catch (e) {
@@ -1955,7 +2099,7 @@ class NfsContainer extends SafeContainer {
     if (!result) result = { entryType: containerTypeCodes.notFound }
 
     debug('%s is type: %s', itemPath, result.entryType)
-    return this._updateResultForPath(itemPath, fileOperation, result)
+    return this._cacheResultForPath(itemPath, fileOperation, result)
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1979,14 +2123,7 @@ class NfsContainer extends SafeContainer {
       // into the cache of this container *and* its parent container
       if (result) {
         let attributes = this._newFileAttributes()
-        this._updateResultForPath(itemPath, 'itemAttributes', attributes)
-        if (this._parent) {
-          // The parentItemPath is the itemPath the parent would see for this item
-          let parentItemPath = this._parentEntryKey.substring(this._parent._subTree.length)
-          parentItemPath = parentItemPath + (parentItemPath.substring(itemPath.length - 1) !== '/' ? '/' : '') + itemPath
-
-          this._parent._updateResultForPath(parentItemPath, 'itemAttributes', attributes)
-        }
+        this._cacheResultForPath(itemPath, 'itemAttributes', attributes)
       }
     } catch (e) {
       debug(e.message)
@@ -2017,6 +2154,13 @@ class NfsContainer extends SafeContainer {
     }
   }
 
+  /**
+   * delete a file
+   *
+   * @param  {String}  itemPath]
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
+   */
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     try {
@@ -2024,7 +2168,17 @@ class NfsContainer extends SafeContainer {
     } catch (e) {
       debug(e.message)
     }
+    return { result: false }
   }
+
+  /**
+   * rename a file and/or move between paths within this container
+   *
+   * @param  {String}  itemPath
+   * @param  {String}  newItemPath
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
+   */
 
   // Note: FUSE or the file system appears to check validity of the
   // operation before calling rename() so we can just concentrate
@@ -2039,6 +2193,7 @@ class NfsContainer extends SafeContainer {
   async renameFile (itemPath, newItemPath) {
     debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
 
+    let result
     try {
       // Don't allow renaming directories because it can use up a lot of entries fast
       // See: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
@@ -2051,12 +2206,13 @@ class NfsContainer extends SafeContainer {
 
       if (itemPath === trimmedNewPath) return // Rename to self so do nothing
 
-      await this._files.moveFile(itemPath, trimmedNewPath)
+      result = await this._files.moveFile(itemPath, trimmedNewPath)
       return true
     } catch (e) {
       debug(e)
       return false
     }
+    return result
   }
 
   /**
@@ -2282,5 +2438,5 @@ module.exports.containerTypeCodes = containerTypeCodes
 module.exports.isCacheableResult = isCacheableResult
 module.exports.defaultContainers = defaultContainers
 module.exports.containerClasses = containerClasses
-module.exports.PublicContainer = PublicContainer
+module.exports.SafeContainer = SafeContainer
 module.exports.NfsContainer = NfsContainer

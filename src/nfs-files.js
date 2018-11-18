@@ -420,23 +420,29 @@ class NfsContainerFiles {
    *
    * @param  {String}  sourcePath
    * @param  {String}  destinationPath
-   * @return {Promise}  true on success
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
    * TODO perhaps this function should return error codes e.g. file not found
    *      but for now it returns true on success, undefined on failure
    */
   async moveFile (sourcePath, destinationPath) {
     debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath)
+    let result = false
+    let deleteResult
     try {
-      if (await this.copyFile(sourcePath, destinationPath, true) &&
-          await this.deleteFile(sourcePath)) {
-        debug('moveFile() succeeded')
-        return true
+      if (await this.copyFile(sourcePath, destinationPath, true)) {
+        deleteResult = await this.deleteFile(sourcePath)
+        if (deleteResult.result) {
+          debug('moveFile() succeeded')
+          result = true
+        }
       } else {
         throw new Error('moveFile() failed')
       }
     } catch (e) {
       debug(e)
     }
+    return { 'result': result, wasLastItem: deleteResult.wasLastItem }
   }
 
   /**
@@ -506,13 +512,15 @@ class NfsContainerFiles {
   /**
    * Delete file
    * @param  {String}  itemPath
-   * @return {Promise}         true on success
+   * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
    * TODO perhaps this function should return error codes on failure?
    */
   async deleteFile (itemPath) {
     debug('%s.deleteFile(\'%s\')', this.constructor.name, itemPath)
     let fileState
     let result
+    let wasLastItem = false
     try {
       fileState = await this.getOrFetchFileState(itemPath)
 
@@ -530,7 +538,7 @@ class NfsContainerFiles {
         this._purgeFileState(fileState) // File no longer exists so purge cache
         if (result) {
           debug('file deleted: ', itemPath)
-          await this._owner._handleCacheForDelete(itemPath)
+          wasLastItem = await this._owner._handleCacheForDelete(itemPath)
         } else {
           throw new Error('file delete failed for: ', itemPath)
         }
@@ -542,7 +550,7 @@ class NfsContainerFiles {
       debug(e.message)
       debug('deleteFile() failed on: ' + itemPath)
     }
-    return result
+    return { 'result': result, 'wasLastItem': wasLastItem }
   }
 
   /**

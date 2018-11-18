@@ -3200,6 +3200,7 @@ const ns = require('solid-namespace')($rdf)
 
 module.exports = SafenetworkApi
 
+module.exports.SafeContainer = containers.SafeContainer
 module.exports.PublicContainer = containers.PublicContainer
 module.exports.ServicesContainer = containers.ServicesContainer
 module.exports.NfsContainer = containers.NfsContainer
