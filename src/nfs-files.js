@@ -175,8 +175,8 @@ class NfsFileState {
 
   isWriteable (flags) {
     if (!flags) flags = this._flags
-    return flags === safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
-           flags === safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
+    return flags & safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
+           flags & safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
   }
 
   async create (nfs) {
