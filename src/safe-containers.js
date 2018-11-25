@@ -11,6 +11,7 @@
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
 const debug = require('debug')('safenetworkjs:containers')
+const error = require('debug')('safenetworkjs:containers E:')
 const debugEntry = require('debug')('safenetworkjs:container-entries')
 const debugCache = require('debug')('safenetworkjs:cache')
 
@@ -110,7 +111,7 @@ class ContainerMap {
     } catch (e) {
       this._map[containerPath] = undefined
       container = undefined
-      debug(e.message)
+      error(e)
     }
     return container
   }
@@ -329,9 +330,9 @@ class SafeContainer {
 
       // Add to FS cache if it has a containerPath
       if (this._containerPath !== '') containerMap.put(this._containerPath, this)
-    } catch (error) {
-      let msg = 'SafeContainer initialise failed: ' + this._name + ' (' + error.message + ')'
-      debug(msg + '\n' + error.stack)
+    } catch (e) {
+      let msg = 'SafeContainer initialise failed: ' + this._name + ' (' + e.message + ')'
+      debug(msg + '\n' + e.stack)
       throw new Error(msg)
     }
   }
@@ -343,7 +344,7 @@ class SafeContainer {
       if (tagType === undefined) throw new Error(this.constructor.name + '._initialiseFromXorName() - tagType not defined')
       this._name = xorName
       return this._safeJs.getMdFromHash(this._name, tagType)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   create () {
@@ -383,7 +384,7 @@ class SafeContainer {
       if (!entryValue || this.isDeletedEntryValue(entryValue)) return false
       return true
     } catch (e) {
-      debug(e)
+      error(e)
       return false
     }
   }
@@ -414,7 +415,7 @@ class SafeContainer {
     try {
       return this._safeJs.getMutableDataValueVersion(this._mData, key)
     } catch (e) {
-      debug(e.message)
+      error(e)
       throw e
     }
   }
@@ -442,7 +443,7 @@ class SafeContainer {
   async getEntryAsFile (key) {
     try {
       return this.nfs().fetch(key)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   async getEntryAsNfsContainer (key) {
@@ -450,7 +451,7 @@ class SafeContainer {
     try {
       let value = await this.getEntryValue(key)
       return this._safeJs.getNfsContainer(value, false, this.isPublic(), this)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   async createNfsFolder (folderPath) {
@@ -567,7 +568,7 @@ class SafeContainer {
           await container.initialise()
         }
       }
-    } catch (error) { debug(error.message) }
+    } catch (e) { error(e) }
 
     return container
   }
@@ -627,7 +628,7 @@ class SafeContainer {
       }
 
       return decodedEntry
-    } catch (e) { debug(e) }
+    } catch (e) { error(e) }
   }
 
   /**
@@ -644,7 +645,7 @@ class SafeContainer {
       await entries.forEach((key, val) => {
         entriesList.push({'key': key, 'value': val})
       })
-    } catch (e) { debug(e) }
+    } catch (e) { error(e) }
     debugEntry('entriesList: %O', entriesList)
     return entriesList
   }
@@ -661,7 +662,7 @@ class SafeContainer {
       let resultsRef = await this.listFolderResultsRef(folderPath)
       if (resultsRef) return resultsRef.result
     } catch (e) {
-      debug(e)
+      error(e)
     }
   }
 
@@ -734,13 +735,13 @@ class SafeContainer {
               debugEntry('%s.listing-3: %o', constructor.name, resultsRef.resultsMap[resultsRef.resultsKey]['listFolder'])
             }
             resolve() // Resolve the entry's promise
-          }).catch((e) => debug(e.message)))
+          }).catch((e) => error(e)))
         }
       })
-      await Promise.all(listingQ).catch((e) => debug(e.message))
+      await Promise.all(listingQ).catch((e) => error(e))
       debugEntry('%s.listing-4-END: %o', constructor.name, listing)
     } catch (e) {
-      debug(e.message)
+      error(e)
       debug('ERROR %s.listFolder(\'%s\') failed', this.constructor.name, folderPath)
     }
 
@@ -838,10 +839,10 @@ class SafeContainer {
               }
             }
             resolve(undefined)
-          }).catch((e) => debug(e.message)))
+          }).catch((e) => error(e)))
         }
       })
-      await Promise.all(entryQ).catch((e) => debug(e.message))
+      await Promise.all(entryQ).catch((e) => error(e))
       if (result === undefined) {
         debug('WARNING: %s._callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
         result = containerTypeCodes.notFound
@@ -850,7 +851,7 @@ class SafeContainer {
       return result
     } catch (e) {
       debug('ERROR: %s._callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -871,7 +872,7 @@ class SafeContainer {
         // Pass to the child container
         return this._callFunctionOnItem(itemPath, 'itemInfo')
       }
-    } catch (error) { debug(error.message) }
+    } catch (e) { error(e) }
   }
 
   /**
@@ -913,10 +914,10 @@ class SafeContainer {
           // type = await this._callFunctionOnItem(itemPath, 'itemType')
         }
       }
-    } catch (error) {
+    } catch (e) {
       debug('file not found')
-      debug(error.message)
-      throw error
+      error(e)
+      throw e
     }
     debug('itemType(%s) returning: ', itemPath, type)
     return type
@@ -954,14 +955,14 @@ class SafeContainer {
               }
             }
             resolve()
-          }).catch((e) => debug(e)))
+          }).catch((e) => error(e)))
         }
       })
       return Promise.all(resultQ).then(_ => {
         debug('MATCH RESULT: ', (result !== undefined ? result : '<no match>'))
         return result
-      }).catch((e) => debug(e))
-    } catch (e) { debug(e) }
+      }).catch((e) => error(e))
+    } catch (e) { error(e) }
   }
 
   /**
@@ -977,7 +978,7 @@ class SafeContainer {
       let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
-      debug(e)
+      error(e)
     }
   }
 
@@ -1036,7 +1037,7 @@ class SafeContainer {
         }
       }
     } catch (e) {
-      debug(e.message)
+      error(e)
       throw e
     }
     if (!resultsRef) {
@@ -1051,7 +1052,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'openFile', nfsFlags)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   async createFile (itemPath) {
@@ -1059,7 +1060,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'createFile')
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   async closeFile (itemPath, fd) {
@@ -1068,7 +1069,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'closeFile', fd)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -1085,7 +1086,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'deleteFile')
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
     return { result: false }
   }
@@ -1104,7 +1105,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'renameFile', newItemPath)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
     return { result: false }
   }
@@ -1119,7 +1120,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'getFileMetadata', fd)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   /**
@@ -1134,7 +1135,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'setFileMetadata', fd, metadata)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   // Read up to len bytes starting from pos
@@ -1144,7 +1145,7 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
-    } catch (e) { debug(e.message) }
+    } catch (e) { error(e) }
   }
 
   // Write up to len bytes into buf (Uint8Array), starting at pos
@@ -1155,7 +1156,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -1181,7 +1182,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'writeFile', fd, content)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -1209,7 +1210,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -1239,7 +1240,7 @@ class SafeContainer {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, '_truncateFile', fd, size)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -1289,7 +1290,7 @@ class SafeContainer {
         listFolderResult = resultsRef.result
       }
       if (listFolderResult.indexOf(itemName) === -1) listFolderResult.push(itemName)
-    } catch (e) { debug(e) }
+    } catch (e) { error(e) }
   }
 
   /**
@@ -1324,7 +1325,7 @@ class SafeContainer {
         // precaution, we clear the cache for it and all parent folders
         this._clearCacheAlongWholePath(folderPath)
       }
-    } catch (e) { debug(e) }
+    } catch (e) { error(e) }
 
     return wasLastItem
   }
@@ -1553,10 +1554,10 @@ class PublicNamesContainer extends SafeContainer {
         // WAS:// Attempt to call itemType on a child container
         // type = await this._callFunctionOnItem(itemPath, 'itemType')
       }
-    } catch (error) {
+    } catch (e) {
       type = containerTypeCodes.notValid
       debug('public name not found: ', itemPath)
-      debug(error.message)
+      error(e)
     }
 
     return type
@@ -1690,10 +1691,10 @@ class ServicesContainer extends SafeContainer {
       //     debug('%s has a container: %s', itemPath, type)
       //     return await this._callFunctionOnItem(itemPath, 'itemType')
       //   }
-    } catch (error) {
+    } catch (e) {
       type = containerTypeCodes.notValid
       debug('file not found')
-      debug(error.message)
+      error(e)
     }
 
     return type
@@ -1718,7 +1719,7 @@ class ServicesContainer extends SafeContainer {
           debug('Unrecognised service: ', itemPath)
         }
       }
-    } catch (error) { debug(error.message) }
+    } catch (e) { error(e) }
   }
 
   /**
@@ -1734,7 +1735,7 @@ class ServicesContainer extends SafeContainer {
       let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
-      debug(e)
+      error(e)
     }
   }
 
@@ -1789,7 +1790,7 @@ class ServicesContainer extends SafeContainer {
         }
       }
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
 
     if (!resultsRef) {
@@ -1931,7 +1932,7 @@ class NfsContainer extends SafeContainer {
         // Pass to the child container
         return this._callFunctionOnItem(itemPath, 'itemInfo')
       }
-    } catch (error) { debug(error.message) }
+    } catch (e) { error(e) }
   }
 
   _entryTypeOf (key) {
@@ -1943,13 +1944,14 @@ class NfsContainer extends SafeContainer {
     let type
 
     try {
-      let fileState = await this._files.getOrFetchFileState(itemPath)
+      let fileState = await this._files._fetchFileState(itemPath, /* fromNetwork */ true)
       if (fileState) {
         if (!fileState.isDeletedFile()) {
           type = containerTypeCodes.file
         } else {
           type = containerTypeCodes.deletedEntry
         }
+        this._files._destroyFileState(fileState)
       }
       // Check for a defaultContainer or fakeContainer
       if (!type || type === containerTypeCodes.deletedEntry) {
@@ -1970,10 +1972,10 @@ class NfsContainer extends SafeContainer {
           }
         }
       }
-    } catch (error) {
+    } catch (e) {
       type = containerTypeCodes.notValid
       debug('file not found')
-      debug(error.message)
+      error(e)
     }
 
     debug('%s is type: ', itemPath, type)
@@ -1993,7 +1995,7 @@ class NfsContainer extends SafeContainer {
       let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
       if (resultsRef) return resultsRef.result
     } catch (e) {
-      debug(e)
+      error(e)
     }
   }
 
@@ -2040,9 +2042,9 @@ class NfsContainer extends SafeContainer {
         let type
         let fileState
         if (fd) {
-          fileState = await this._files.getCachedFileState(itemPath, fd)
+          fileState = await this._files.getFileStateForDescriptor(fd)
         } else {
-          fileState = await this._files.getOrFetchFileState(itemPath)
+          fileState = await this._files._fetchFileState(itemPath, /* fromNetwork */ true)
         }
 
         if (fileState) {
@@ -2054,6 +2056,7 @@ class NfsContainer extends SafeContainer {
         } else {
           type = await this.itemType(itemPath)
         }
+
         if (type === containerTypeCodes.file) {
           // File (or new file if fileState._fileFetched is undefined)
           let file = fileState._fileFetched
@@ -2089,14 +2092,15 @@ class NfsContainer extends SafeContainer {
             'isFile': false,
             entryType: type
           }
+        } else if (type === containerTypeCodes.notFound) {
+          result = { entryType: containerTypeCodes.notFound }
         } else {
           throw new Error('Unexpected itemType: ' + type)
         }
       }
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
-    if (!result) result = { entryType: containerTypeCodes.notFound }
 
     debug('%s is type: %s', itemPath, result.entryType)
     return this._cacheResultForPath(itemPath, fileOperation, result)
@@ -2107,7 +2111,7 @@ class NfsContainer extends SafeContainer {
     try {
       return await this._files.openFile(itemPath, nfsFlags)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2126,7 +2130,7 @@ class NfsContainer extends SafeContainer {
         this._cacheResultForPath(itemPath, 'itemAttributes', attributes)
       }
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
     return result
   }
@@ -2150,7 +2154,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.closeFile(itemPath, fd)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2166,7 +2170,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.deleteFile(itemPath)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
     return { result: false }
   }
@@ -2209,7 +2213,7 @@ class NfsContainer extends SafeContainer {
       result = await this._files.moveFile(itemPath, trimmedNewPath)
       return true
     } catch (e) {
-      debug(e)
+      error(e)
       return false
     }
     return result
@@ -2225,7 +2229,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.getFileMetadata(itemPath, fd)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2241,7 +2245,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2267,7 +2271,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.readFile(itemPath, fd, pos, len)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2294,7 +2298,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.readFileBuf(itemPath, fd, buf, pos, len)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2319,7 +2323,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.writeFile(itemPath, fd, content)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2346,7 +2350,7 @@ class NfsContainer extends SafeContainer {
     try {
       return this._files.writeFileBuf(itemPath, fd, buf, len)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
@@ -2372,10 +2376,10 @@ class NfsContainer extends SafeContainer {
   async _truncateFile (itemPath, fd, size) {
     debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
     try {
-      if (size !== 0) throw new Error('truncateFile() not implemented for size other than zero')
+      if (size !== 0) throw new Error('_truncateFile() not implemented for size other than zero')
       return this._files._truncateFile(itemPath, fd, size)
     } catch (e) {
-      debug(e.message)
+      error(e)
     }
   }
 
