@@ -285,7 +285,7 @@ class NfsContainerFiles {
     this._safeJs = safeJs
     this._mData = mData
     this._nfs = nfs
-    this._containerNfsFetchedFiles = {}  // Map NFS container path to NFS fetched File objects
+    this._containerNfsFiles = {}  // Map NFS container path to NFS fetched or created File objects
   }
 
   nfs () { return this._nfs }
@@ -295,12 +295,12 @@ class NfsContainerFiles {
   }
 
   // Clear cache to force subsequent fetch() from network
-  clearFetchedNfsFileFor (itemPath) {
-    delete this._containerNfsFetchedFiles[itemPath]
+  clearNfsFileFor (itemPath) {
+    delete this._containerNfsFiles[itemPath]
   }
 
   _newFileState (itemPath, file, hasKey) {
-    debug('%s._newFileState(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, file, hasKey)
+    debug('%s._newFileState(\'%s\', %o, %s)', this.constructor.name, itemPath, file, hasKey)
     try {
       let fileState = new NfsFileState(itemPath, file, hasKey)
       debug('fileState: %o', fileState)
@@ -324,12 +324,12 @@ class NfsContainerFiles {
    * TODO consider accepting a SAFE API error code, and using that to decide
    * whether to invalidate the file descriptor.
    *
-   * Note NFS fetched File objects remain in this._containerNfsFetchedFiles[]
+   * Note NFS fetched/created File objects remain in this._containerNfsFiles[]
    * and are never deleted. This could accumulate over time so the number of
    * these could be limited, and this would be a good place to purge the
    * cache of excess objects. So..
    *
-   * TODO implement limit on size of this._containerNfsFetchedFiles[]
+   * TODO implement limit on size of this._containerNfsFiles[]
    * based on time since last use. So each cache access must update a last
    * access time, and here we add code to purge the N least used entries
    * needed to bring the size of the cache down to a desired limit. Keeping
@@ -342,7 +342,7 @@ class NfsContainerFiles {
   }
 
   /**
-   * Fetch NFS File from cache of fetched NFS File objects, or the network
+   * Fetch NFS File from cache of NFS File objects, or the network
    *
    * @param  {String}  itemPath A path (NFS entry key)
    * @param  {Boolean} fromNetwork if true, get from network and update cache
@@ -353,10 +353,10 @@ class NfsContainerFiles {
     let fileState
     try {
       let file
-      if (!fromNetwork) file = this._containerNfsFetchedFiles[itemPath] // Cached NFS fetch() File
+      if (!fromNetwork) file = this._containerNfsFiles[itemPath] // Cached NFS fetch() File objects from fetch()/open()
       if (!file) {
         file = await this.nfs().fetch(itemPath)
-        if (file) this._containerNfsFetchedFiles[itemPath] = file
+        if (file) this._containerNfsFiles[itemPath] = file
       }
       if (file) {
         fileState = this._newFileState(itemPath, file, true)
@@ -503,15 +503,19 @@ class NfsContainerFiles {
       if (!fileState) fileState = this._newFileState(itemPath, undefined, /* hasKey */ false)
 
       if (fileState && await fileState.create(this.nfs())) {
-        debug('(%s) created: ', fileState.fileDescriptor())
+        debug('(%s) created: ', fileState.fileDescriptor(), itemPath)
         debug('fileState: %o', fileState)
+        this._containerNfsFiles[itemPath] = fileState._fileOpened
         this._owner._handleCacheForCreateFileOrOpenWrite(itemPath)
         return fileState.fileDescriptor()
       } else {
         throw new Error('createFile() failed')
       }
     } catch (e) {
-      if (fileState) this._destroyFileState(fileState)
+      if (fileState) {
+        this._destroyFileState(fileState)
+        this.clearNfsFileFor(itemPath)                  // Flush cached NFS File object
+      }
       error(e)
       throw e
     }
@@ -546,7 +550,7 @@ class NfsContainerFiles {
         if (result) {
           debug('deleted: ', itemPath)
           this._destroyFileState(fileState)               // Purge from cache
-          this.clearFetchedNfsFileFor(itemPath)           // Flush cached NFS File object
+          this.clearNfsFileFor(itemPath)                  // Flush cached NFS File object
           wasLastItem = await this._owner._handleCacheForDelete(itemPath)
         } else {
           throw new Error('file delete failed for: ', itemPath)
@@ -791,7 +795,7 @@ class NfsContainerFiles {
           // Get state before it is invalidated by fileState.close()
           await fileState._truncate(this.nfs(), size)
           this._owner._handleCacheForChangedAttributes(itemPath)
-          this.clearFetchedNfsFileFor(itemPath) // Flush cached NFS File object
+          this.clearNfsFileFor(itemPath) // Flush cached NFS File object
           return 0  // Success
         }
       } else {
@@ -799,7 +803,7 @@ class NfsContainerFiles {
         // we truncate any open-for-write NFS Files for this path
         await this.__truncateOpenFiles(itemPath, size)
         this._owner._handleCacheForChangedAttributes(itemPath)
-        this.clearFetchedNfsFileFor(itemPath) // Flush cached NFS File object
+        this.clearNfsFileFor(itemPath) // Flush cached NFS File object
         return 0  // Success
       }
     } catch (e) {
@@ -848,7 +852,7 @@ class NfsContainerFiles {
         let version = fileState.version()
         await fileState.close(this.nfs())
         if (isModified) {
-          this.clearFetchedNfsFileFor(itemPath) // Flush cached NFS File object
+          this.clearNfsFileFor(itemPath) // Flush cached NFS File object
           this._owner._handleCacheForChangedAttributes(itemPath)
           let permissions // use defaults
           debug('doing %s(\'%s\')', fileState.hasKey ? 'update' : 'insert', itemPath)
