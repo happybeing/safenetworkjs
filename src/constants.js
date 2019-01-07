@@ -2,9 +2,9 @@
  * SafenetworkJs constants
  *
  * Also includes SAFE constants not exposed by safe_app_nodejs.CONSTANTS
+ *  Ref: https://github.com/maidsafe/safe_app_nodejs/blob/83a5bc47575270723c2fa748cde104d0ec770250/src/consts.js#L15
  *
- * TODO if SAFE API starts providing error codes, replace this to use them
- * TODO ref: https://github.com/maidsafe/safe-web-hosting-manager-electron/blob/master/app/constants.js#L46
+ * TODO replace codes here that are now present above
  */
 
 const CONSTANTS = {
