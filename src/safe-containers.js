@@ -1201,14 +1201,15 @@ class SafeContainer {
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
+   * @param  {Number}  pos  [optional] position of file to write (must not be less than end of last write)
    * @return {Promise}          Number of bytes written to file
    */
-  async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
+  async writeFileBuf (itemPath, fd, buf, len, pos) {
+    debug('%s.writeFileBuf(\'%s\', %s, buf, %s, %s)', this.constructor.name, itemPath, fd, len, pos)
 
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this._callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len)
+      return await this._callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len, pos)
     } catch (e) {
       error(e)
     }
@@ -2342,13 +2343,14 @@ class NfsContainer extends SafeContainer {
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
+   * @param  {Number}  pos  [optional] position of file to write (must not be less than end of last write)
    * @return {Promise}          Number of bytes written to file
    */
-  async writeFileBuf (itemPath, fd, buf, len) {
-    debug('%s.writeFileBuf(\'%s\', %s, buf, %s)', this.constructor.name, itemPath, fd, len)
+  async writeFileBuf (itemPath, fd, buf, len, pos) {
+    debug('%s.writeFileBuf(\'%s\', %s, buf, %s, %s)', this.constructor.name, itemPath, fd, len, pos)
 
     try {
-      return this._files.writeFileBuf(itemPath, fd, buf, len)
+      return this._files.writeFileBuf(itemPath, fd, buf, len, pos)
     } catch (e) {
       error(e)
     }
