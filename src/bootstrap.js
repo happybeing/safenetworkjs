@@ -63,7 +63,7 @@ Safe.fromUri = async (app, uri) => {
 
   const uri2 = await ipcReceive(String(process.pid))
 
-  return app.auth.loginFromURI(uri2) // TODO change to loginFromUri for v0.9.1
+  return app.auth.loginFromUri(uri2)
 }
 
 // Request authorisation
@@ -96,8 +96,7 @@ Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
     uri = await ipcReceive(String(process.pid))
   }
 
-  // TODO revert to safe-node-app v0.9.1: call fromAuthUri() instead of fromAuthURI()
-  return Safe.fromAuthURI(appInfo, uri, null, options)
+  return Safe.fromAuthUri(appInfo, uri, null, options)
 }
 
 async function authorise (pid, appInfo, appContainers, containerOpts, options) {
@@ -110,14 +109,14 @@ async function authorise (pid, appInfo, appContainers, containerOpts, options) {
       '--uri'
     ]
   }
-  debug('call Safe.initializeApp()...')
-  // TODO revert to safe-node-app v0.9.1: call initialiseApp() instead of initializeApp()
-  const app = await Safe.initializeApp(appInfo, undefined, options)
-  debug('call app.auth.genAuthUri()...')
+  debug('call Safe.initialiseApp() with \nappInfo: ' + JSON.stringify(appInfo) +
+    '\noptions: ' + JSON.stringify(options))
+  const app = await Safe.initialiseApp(appInfo, undefined, options)
+  debug('call app.auth.genAuthUri() with appContainers: \n' + JSON.stringify(appContainers) +
+    '\ncontainerOpts: \n' + JSON.stringify(containerOpts))
   const uri = await app.auth.genAuthUri(appContainers, containerOpts)
 
-  debug('bootstrap.authorise() with appInfo: ' + JSON.stringify(appInfo) +
-    'appContainers: ' + JSON.stringify(appContainers))
+  debug('call app.auth.openUri() with uri: \n' + JSON.stringify(uri.uri))
   await app.auth.openUri(uri.uri)
   debug('wait a mo')
 }

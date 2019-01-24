@@ -498,7 +498,7 @@ class NfsContainerFiles {
       if (fileState) debug('fileState: %o', fileState)
       if (fileState && await fileState.open(this.nfs(), nfsFlags)) {
         // The File object returned by open lacks .version / .size of File object returned by fetch()
-        // This should be fixed or documented, so try again with v0.9.1
+        // This should be fixed or documented, so try again with v0.9.1 and above (was 0.8.?)
         // Also the error is odd: currently when file open() for write, _fileOpened.size() gives strange error: '-1016: Invalid file mode (e.g. trying to write when file is opened for reading only)')
         debug('(%s) opened, size: ', fileState.fileDescriptor(), await fileState._fileFetched.size())
         debug('fileState: %o', fileState)

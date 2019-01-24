@@ -156,7 +156,7 @@
       [ ] _public makeFolder()
         - if the path is within _public, creates NFS container there
         - if the path is within an NFS container, it returns an error
-      [ ] _public listFolder()
+      [/] _public listFolder()
         - the above description of _public makeFolder() permits an NFS folder
           to exist at a path that is a parent of another path within a default
           container. For example, the following entries would be permitted
@@ -174,7 +174,7 @@
         - they are all forgotten at the end of a session = easy
         - on creating a file which resides at the leaf of a virtual directory:
         - clear path and subpaths on successful release() (ie file close).
-      [ ] Deleting the last file in a directory:
+      [/] Deleting the last file in a directory:
         - should deleting the last file in directory create a virtual
           directory? Ideally yes, because it will be odd for directories
           to disappear if you delete the last file. It might be tricky
@@ -185,7 +185,7 @@
           call getattr() on the folder at the end of every unlink()
           and see how that works.
     [ ] fileExists(path)
-  [ ] _webMounts of arbitrary public websites
+  [/] _webMounts of arbitrary public websites
     -> BRANCH dev-mounturi
     [/] fixup old services code
     [/] modify RootHandler to automount URIs give as a filename: _webMounts/service.name
@@ -251,8 +251,8 @@ OTHER TO THINK ABOUT
       - [optional?] insert a meta entry that points to the old MD
       - update the object (eg services MD) to point to the new NFS container
 CONSIDER FOR  V0.2.0
-  [ ] update for safe_node_app v0.9.1
-    [ ] refactor older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
+  [/] update for safe_node_app v0.10.3 (tested with SB 0.11.1)
+  [ ] refactor any older SafenetworkJs code still using forEach on entries to use listEntries (see listFolder for method)
   [ ] review code for cross platform issues, see: https://shapeshed.com/writing-cross-platform-node/
 
   == safe-containers.js ==
@@ -260,7 +260,7 @@ CONSIDER FOR  V0.2.0
       - by creating a placeholder file (see: https://github.com/maidsafe/rfcs/issues/227#issuecomment-418447895)
       - PREFERRED: 'ghost' folders held in memory by SafeContainer (wiped on
       destruction or saved only on the client). Might double as a local FS cache?
-  [ ] implement caching in safe-containers.js
+  [] implement caching in safe-containers.js
     [x] gather some performance/profiling info (even very crude is good)
     [/] review info from Maidsafe on API GET use
         see https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
@@ -944,7 +944,7 @@ class SafenetworkApi {
         try {
           const nat = await nfs.mData.getNameAndTag()
           const mdPermissions = [{
-            type_tag: nat.type_tag, // TODO change to typeTag for v0.9.1
+            typeTag: nat.typeTag,
             name: nat.name,
             'perms': perms
           }]
@@ -1465,7 +1465,7 @@ class SafenetworkApi {
 
       // TODO remove (test only):
       let r = await servicesMd.getNameAndTag()
-      logApi('servicesMd created with tag: ', r.type_tag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
+      logApi('servicesMd created with tag: ', r.typeTag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
       let publicNamesMd = await this.safeApi.getContainer('_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
@@ -1478,7 +1478,7 @@ class SafenetworkApi {
 
       // TODO remove (test only):
       r = await servicesMd.getNameAndTag()
-      /* logApi('DEBUG new servicesMd created with tag: ', r.type_tag, ' and name: ', r.name)
+      /* logApi('DEBUG new servicesMd created with tag: ', r.typeTag, ' and name: ', r.name)
       logApi('DEBUG _publicNames entry created for %s', publicName)
       logApi('DEBUG servicesMd for public name \'%s\' contains...', publicName)
       await this.listMd(servicesMd, publicName + ' servicesMd')

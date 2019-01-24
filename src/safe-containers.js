@@ -632,25 +632,6 @@ class SafeContainer {
   }
 
   /**
-   * get a list of folders
-   *
-   * @param  {String}  folderPath path relative to this._containerPath
-   * @return {Promise}            list of sub-folder names at folderPath
-   */
-
-  // Simulate safe-node-app v0.9.1 function:
-  async _listEntriesHack (entries) {
-    let entriesList = []
-    try {
-      await entries.forEach((key, val) => {
-        entriesList.push({'key': key, 'value': val})
-      })
-    } catch (e) { error(e) }
-    debugEntry('entriesList: %O', entriesList)
-    return entriesList
-  }
-
-  /**
    * Get listing of folder
    * @param  {String}  folderPath
    * @return {Promise}    list of file and folder names in the folder
@@ -690,10 +671,7 @@ class SafeContainer {
 
       let listingQ = []
       let entries = await this._mData.getEntries()
-      // TODO revert to safe-node-app v0.9.1 code:
-      // let entriesList = await entries.listEntries()
-      // TODO remove safe-node-app v0.8.1 code:
-      let entriesList = await this._listEntriesHack(entries)
+      let entriesList = await entries.listEntries()
       entriesList.forEach(async (entry) => {
         if (!this.isDeletedEntryValue(entry.value)) {
           listingQ.push(new Promise(async (resolve, reject) => {
@@ -790,7 +768,7 @@ class SafeContainer {
       // TODO revert to safe-node-app v0.9.1 code:
       // let entriesList = await entries.listEntries()
       // TODO remove safe-node-app v0.8.1 code:
-      let entriesList = await this._listEntriesHack(entries)
+      let entriesList =  await entries.listEntries()
       let entryQ = []
       entriesList.forEach(async (entry) => {
         if (!this.isDeletedEntryValue(entry.value)) {
@@ -936,10 +914,7 @@ class SafeContainer {
     let resultQ = []
     try {
       let entries = await this._mData.getEntries()
-      // TODO revert to safe-node-app v0.9.1 code:
-      // let entriesList = await entries.listEntries()
-      // TODO remove safe-node-app v0.8.1 code:
-      let entriesList = await this._listEntriesHack(entries)
+      let entriesList = await entries.listEntries()
       entriesList.forEach(async (entry) => {
         if (!this.isDeletedEntryValue(entry.value)) {
           resultQ.push(new Promise(async (resolve, reject) => {
