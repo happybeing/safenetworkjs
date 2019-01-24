@@ -191,7 +191,7 @@ class NfsFileState {
   version () { return this._fileFetched ? this._fileFetched.version : undefined }
 
   isWriteable (flags) {
-    if (!flags) flags = this._flags
+    if (flags === undefined) flags = this._flags
     return flags & safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
            flags & safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
   }
@@ -232,8 +232,10 @@ class NfsFileState {
           // NFS fails to open zero length files for read, so we must fake it
           size = await this._fileFetched.size()
           this.isEmptyOpen = (size === 0)
+          debug('size: ', size)
         } catch (discard) {}
 
+        debug('isEmptyOpen: %s', this.isEmtpyOpen)
         if (!this.isEmptyOpen) opened = await nfs.open(this._fileFetched, nfsFlags)
       }
       this._fileOpened = opened
@@ -488,6 +490,10 @@ class NfsContainerFiles {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     let fileState
     try {
+      if (itemPath.indexOf('/pack/tmp_pack_') !== -1) {
+        debug('opening temp pack file!')
+      }
+
       fileState = await this._fetchFileState(itemPath)
       if (fileState) debug('fileState: %o', fileState)
       if (fileState && await fileState.open(this.nfs(), nfsFlags)) {
