@@ -918,6 +918,8 @@ class SafenetworkApi {
       debug(e)
       if (e.code === CONSTANTS.ERROR_CODE.LOW_BALANCE) {
         this.enableLowBalanceWarning()
+      } else if (e.code === CONSTANTS.ERROR_CODE.ACCESS_DENIED) {
+        throw e // Throw so that nfsMutate() can request permission
       }
     }
     return result
@@ -938,7 +940,7 @@ class SafenetworkApi {
     let perms = permissions !== undefined ? permissions : defaultContainerPerms['NfsContainer']
     let result
     try {
-      result = this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
+      result = await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
     } catch (e) {
       if (e.code === CONSTANTS.ERROR_CODE.ACCESS_DENIED) {
         try {
@@ -950,7 +952,7 @@ class SafenetworkApi {
           }]
           const uri = await this.auth.genShareMDataUri(mdPermissions)
           await this.safeApi.fromUri(this.safeApp, uri)
-          result = this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
+          result = await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
         } catch (e) {
           throw e
         }
