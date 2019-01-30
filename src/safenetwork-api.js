@@ -83,8 +83,8 @@
             [/] use isValidKey() when returning public name listFolder()
             [/] use isValidKey() when implementing public name mkdir()
           [/] BUG ls ~/SAFE/_public/rsapp/root-www # hangs!
-      [/] create SAFE FUSE Linux build for testers
-      [/] announce SAFE FUSE available to test
+      [/] create SAFE Drive Linux build for testers
+      [/] announce SAFE Drive available to test
         See: https://forum.safedev.org/t/safe-fuse-help-with-testing/2019/4?u=happybeing
       [/] update the README.md with instructions for:
         [/] users
@@ -100,7 +100,7 @@
           [/] tag
           [/] merge to master
           [/] announce
-        [/] SAFE FUSE v0.1.0
+        [/] SAFE Drive v0.1.0
           [/] tag
           [/] merge to master
           [/] announce
@@ -276,7 +276,7 @@ CONSIDER FOR  V0.2.0
       them so everywhere that caches info about an itemPath will be cleared.
   [ ] TODO replace CONSTANTS.MD_METADATA_KEY with SAFE constant when avail (search and replace)
   [ ] figure out how to provide better metrics for container size etc in itemInfo() itemAttributes()
-    [ ] SAFE FUSE issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
+    [ ] SAFE Drive issue is 'ls -l' always shows 'total 0' (It should show total blocks used by files in directory. See info ls)
   [ ] add support for webIds
     [ ] decide on UX:
       - a new type of container?
