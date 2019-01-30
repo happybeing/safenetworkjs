@@ -7,7 +7,7 @@ SafenetworkJs is a library for implementing web, desktop and command line apps f
 ## Supports:
 - Web apps running in SAFE Browser
 - Desktop and command line apps on Windows, Mac OS and Linux
-- NodeJs including cross platform packaged CLI apps (e.g. [safe-cli-boilerplate](https://github.com/theWebalyst/safe-cli-boilerplate) and [SAFE FUSE](https://github.com/theWebalyst/safenetwork-fuse/))
+- NodeJs including cross platform packaged CLI apps (e.g. [safe-cli-boilerplate](https://github.com/theWebalyst/safe-cli-boilerplate) and [SAFE Drive](https://github.com/theWebalyst/safe-drive/))
 
 ## Provides APIs:
 - authorisation with SAFE Network (via SAFE Browser)
@@ -17,7 +17,7 @@ SafenetworkJs is a library for implementing web, desktop and command line apps f
 - access to SAFE network via RESTful interface in web, desktop and CLI applications via `fetch()`
 
 ## Status
-This NodeJs library is under development but already in use in [SAFE FUSE](https://github.com/theWebalyst/safenetwork-fuse/) which mounts files, public names (DNS) and services on your local drive. SAFE FUSE is a command line application which targets Windows, Mac OS and Linux. It uses SafenetworkJs for all interactions with SAFE Network including authorisation, and access to SAFE storage via a file system API, and for access to SAFE public names (DNS) and services.
+This NodeJs library is under development but already in use in [SAFE Drive](https://github.com/theWebalyst/safe-drive/) which mounts files, public names (DNS) and services on your local drive. SAFE Drive is a command line application which targets Windows, Mac OS and Linux. It uses SafenetworkJs for all interactions with SAFE Network including authorisation, and access to SAFE storage via a file system API, and for access to SAFE public names (DNS) and services.
 
 SafenetworkJs incorporates the code from a discontinuted web library: [safenetwork-web](https://github.com/theWebalyst/safenetwork-web) that added RESTful services for SAFE Network (implemented in the client) and was used to demonstrate a [Solid](https://solid.mit.edu/) web app runnning on SAFE Network (Safe Plume blog). Much of that code has been refactored for the safe-node-app API v0.10.x, and incorporated in SafenetworkJs.
 
@@ -44,7 +44,7 @@ SAFE is an open source project of @maidsafe, a private company which is majority
 
 # Development
 
-If you wish to develop with or improve this library, please see the instructions on set-up and debugging in the [SAFE FUSE repository](https://github.com/theWebalyst/safenetwork-fuse/#development).
+If you wish to develop with or improve this library, please see the instructions on set-up and debugging in the [SAFE Drive repository](https://github.com/theWebalyst/safe-drive/#development).
 
 Pull requests are welcome for outstanding issues and feature requests. Please note that contributions are subject to the LICENSE (see below).
 
