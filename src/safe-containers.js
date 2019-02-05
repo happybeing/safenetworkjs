@@ -2037,9 +2037,9 @@ class NfsContainer extends SafeContainer {
           // File (or new file if fileState._fileFetched is undefined)
           let file = fileState._fileFetched
           result = {
-            modified: file ? file.modified : now,
+            modified: file ? Number(file.modified) : now,
             accessed: now,
-            created: file ? file.created : now,
+            created: file ? Number(file.created) : now,
             size: file ? await fileState._fileFetched.size() : 0,
             version: file ? file.version : 0,
             'isFile': true,

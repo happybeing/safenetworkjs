@@ -431,14 +431,16 @@ class NfsContainerFiles {
       if (!destFileState) {
         // Destination is a new file, so insert
         result = await this._safeJs.nfsMutate(this.nfs(), perms, 'insert', destinationPath, srcNfsFile)
+        this._owner._handleCacheForCreateFileOrOpenWrite(destinationPath)
       } else {
         // Destination exists, so update
         let nfsIgnoreVersionConstant = 0 // TODO use NFS API constant when available
         let nfsVersion = (ignoreVersion ? destFileState.version() + 1 : nfsIgnoreVersionConstant)
         result = await this._safeJs.nfsMutate(this.nfs(), perms, 'update', destinationPath, srcNfsFile, nfsVersion)
         this._destroyFileState(destFileState) // New file so purge the cache
+        this.clearNfsFileFor(destinationPath)                  // Flush cached NFS File object
+        this._owner._handleCacheForChangedAttributes(destinationPath)
       }
-      this._owner._handleCacheForCreateFileOrOpenWrite(destinationPath)
 
       // After using the fetched file to update another entry, it takes on the version of the other, so needs refreshing
       this._destroyFileState(srcFileState)
@@ -628,8 +630,8 @@ class NfsContainerFiles {
           itemPath, undefined, fileState.version() + 1)
         if (result) {
           debug('deleted: ', itemPath)
-          this._destroyFileState(fileState)               // Purge from cache
-          this.clearNfsFileFor(itemPath)                  // Flush cached NFS File object
+          this._destroyFileState(fileState) // Purge from cache
+          this.clearNfsFileFor(itemPath)          // Flush cached NFS File object
           wasLastItem = await this._owner._handleCacheForDelete(itemPath)
         } else {
           throw new Error('file delete failed for: ', itemPath)
