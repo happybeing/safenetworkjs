@@ -53,13 +53,9 @@ function isCacheableResult (fileOperation, operationResult) {
 
   if (fileOperation === 'itemAttributes') {
     let containerType = operationResult.entryType
-    return containerType === containerTypeCodes.defaultContainer ||
-      containerType === containerTypeCodes.nfsContainer ||
-      containerType === containerTypeCodes.file ||
-      containerType === containerTypeCodes.newFile ||
-      containerType === containerTypeCodes.fakeContainer ||
-      containerType === containerTypeCodes.servicesContainer ||
-      containerType === containerTypeCodes.service
+      // We don't store/update times for directories, instead always use 'now'
+      return containerType === containerTypeCodes.file ||
+      containerType === containerTypeCodes.newFile
   }
   if (fileOperation === 'listFolder') {
     return true
