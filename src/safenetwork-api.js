@@ -1693,46 +1693,53 @@ class SafenetworkApi {
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
+      let listingQ = []
       let entries = await servicesMd.getEntries()
       logApi("checking servicesMd entries for host '%s'", host)
       this.hostedService = null
-      await entries.forEach(async (k, v) => {
-        logApi('Key: ', k.toString())
-        logApi('Value: ', v.buf.toString())
-        logApi('Version: ', v.version)
-        let serviceKey = k.toString()
-        if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-          logApi('Skipping metadata entry: ', serviceKey)
-          return
-        }
-
-        // Defaults:
-        let serviceProfile = ''
-        let serviceId = 'www'
-
-        if (serviceKey.indexOf('@' === -1)) {
-          serviceProfile = serviceKey
-        } else {
-          serviceProfile = serviceKey.split('@')[0]
-          serviceId = serviceKey.split('@')[1]
-          if (!serviceId || serviceId === '') serviceId = 'www'
-        }
-
-        let serviceValue = v
-        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
-        if (serviceProfile === uriProfile) {
-          let serviceFound = this._availableServices.get(serviceId)
-          if (serviceFound) {
-            // Use the installed service to enable the service on this host
-            let newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
-            this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
-            logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
-            this.hostedService = newHostedService
-          } else {
-            logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach(async (entry) => {
+        listingQ.push(new Promise(async (resolve, reject) => {
+          logApi('Key: ', entry.key.toString())
+          logApi('Value: ', entry.value.buf.toString())
+          logApi('Version: ', entry.value.version)
+          let serviceKey = entry.key.toString()
+          if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+            logApi('Skipping metadata entry: ', serviceKey)
+            resolve()
+            return  // Skip
           }
-        }
+
+          // Defaults:
+          let serviceProfile = ''
+          let serviceId = 'www'
+
+          if (serviceKey.indexOf('@' === -1)) {
+            serviceProfile = serviceKey
+          } else {
+            serviceProfile = serviceKey.split('@')[0]
+            serviceId = serviceKey.split('@')[1]
+            if (!serviceId || serviceId === '') serviceId = 'www'
+          }
+
+          let serviceValue = entry.value
+          logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+          if (serviceProfile === uriProfile) {
+            let serviceFound = this._availableServices.get(serviceId)
+            if (serviceFound) {
+              // Use the installed service to enable the service on this host
+              let newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
+              this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
+              logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+              this.hostedService = newHostedService
+            } else {
+              logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+            }
+          }
+          resolve() // Done
+        }))
       })
+      await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
       if (!this.hostedService) {
         logApi("WARNING no service setup for host '" + host + "'")
