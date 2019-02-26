@@ -332,6 +332,7 @@ TODO: these notes were written early in the design so need review and update:
 
 safenetworkjs and safenetwork-web
 =================================
+TODO update this if I can eliminate safenetwork-web
 
 safenetworkjs (this module)
 -------------
@@ -396,17 +397,6 @@ const logApi = require('debug')('safenetworkjs:web')  // Web API
 const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
 const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
 const logTest = require('debug')('safenetworkjs:test')  // Test output
-
-// TODO: when browser API matches this, add a build of safenetworkjs for web
-let safeApi
-if (typeof window !== 'undefined') {  // Browser SAFE DOM API
-  safeApi = this.safeApi // TODO this from bootstrap and make bootstrap do the test on window
-  const err = 'WARNING: safenetworkjs not built with support for browser yet'
-  debug(err)
-  throw new Error(err)
-} else {                              // SAFE App NodeJS API
-  safeApi = require('./bootstrap')
-}
 
 let extraDebug = false
 
@@ -533,7 +523,12 @@ class SafenetworkApi {
     this._safeContainerOpts = undefined
     this._safeAuthUri = undefined
 
-    this.safeApi = safeApi      // Access to SAFE API (DOM or NodeJS)
+    // Access to SAFE API (DOM or NodeJS)
+    // Must be set by either:
+    // - index.js (nodejs app), or
+    // - index-web.js (Browser app)
+    debug( 'this.safeApi is %o: ', this.safeApi)
+
     this.safeUtils = safeUtils  // Access to utilities
 
     this._availableServices = new Map() // Map of installed services
@@ -656,14 +651,13 @@ class SafenetworkApi {
 
   // Set SAFE DOM API application handle
   //
-  // If application does its own safeApp.initialise, it must call setSafeApi()
+  // If application does its own safeApp.initialise, it must call setSafeAppHandle()
   // Application can call this again if it wants to clear/refresh DOM API handles
   //
   // @param a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
 
-  // TODO rework for new web API when released
-  setSafeApi (appHandle) {
+  setSafeAppHandle (appHandle) {
     this.initialise()             // Clears active services (so DOM API handles will be discarded)
     this._appHandle = appHandle   // SAFE API application handle
 
@@ -704,10 +698,19 @@ class SafenetworkApi {
   isAuthorised () { return this._isAuthorised }
   services () { return this._availableServices }  // Note: these are ServiceInterface rather than ServiceContainer
 
+  /**
+   * authorise with SAFE Network - for desktop apps (non-browser)
+   *
+   * @param  {object}  appConfig     See SAFE API docs
+   * @param  {object}  appContainers See SAFE API docs
+   * @param  {object}  containerOpts See SAFE API docs
+   * @param  {object}  argv          TODO ???
+   * @return {Promise}
+   */
   async authoriseWithSafeBrowser (appConfig, appContainers, containerOpts, argv) {
-    // bootstrap is for auth from node and CLI
-    safeApi.bootstrap(appConfig, appContainers, containerOpts, argv).then((safeApp) => {
-      this.setSafeApi(safeApp)
+    // bootstrap is for auth from nodeJs and CLI
+    this.safeApi.bootstrap(appConfig, appContainers, containerOpts, argv).then((safeApp) => {
+      this.setSafeAppHandle(safeApp)
       this._safeAppConfig = appConfig
       this._safeAppContainers = appContainers
       this._safeContainerOpts = containerOpts
@@ -733,50 +736,54 @@ class SafenetworkApi {
   //
 
   // TODO review/update initReadOnly() - commented out for now.
-  // async initReadOnly (appConfig = untrustedAppConfig) {
-  //   logApi('%s.initReadOnly(%O)...', this.constructor.name, appConfig)
-  //
-  //   // TODO remove when 'connection problems' solved (see dev forum )
-  //   if (extraDebug) {
-  //     // DEBUG CODE
-  //     logApi('DEBUG WARNING using connectAuthorised() NOT connect()')
-  //     let debugConfig = {
-  //       id: 'com.happybeing.plume.poc',
-  //       name: 'SAFE Plume (PoC)',
-  //       vendor: 'com.happybeing'
-  //     }
-  //     return this.simpleAuthorise(debugConfig, defaultPerms)
-  //   }
-  //
-  //   let tmpAppHandle
-  //   try {
-  //     tmpAppHandle = await safeApi.initializeApp(appConfig, (newState) => {
-  //       // Callback for network state changes
-  //       logApi('SafeNetwork state changed to: ', newState)
-  //       this._isConnected = newState // TODO bugchase
-  //     })
-  //
-  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-  //     this.setSafeApi(tmpAppHandle)
-  //     this._safeAppConfig = appConfig
-  //     this._safeAppPermissions = undefined
-  //     if (window) {
-  //       await this.safeApi.connect(tmpAppHandle)
-  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-  //       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     } else {
-  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-  //       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     }
-  //     return this._appHandle
-  //   } catch (err) {
-  //     logApi('WARNING: ', err)
-  //     this.setSafeApi(null)
-  //     throw (err)
-  //   }
-  // }
+  async initReadOnly (appConfig = untrustedAppConfig) {
+    logApi('%s.initReadOnly(%O)...', this.constructor.name, appConfig)
 
-  // Simplified one-step authorisation with SAFE network (init, auth and connect)
+    // TODO remove when 'connection problems' solved (see dev forum )
+    if (extraDebug) {
+      // DEBUG CODE
+      logApi('DEBUG WARNING using connectAuthorised() NOT connect()')
+      let debugConfig = {
+        id: 'com.happybeing.plume.poc',
+        name: 'SAFE Plume (PoC)',
+        vendor: 'com.happybeing'
+      }
+      return this.simpleAuthorise(debugConfig, defaultPerms)
+    }
+
+    let tmpAppHandle
+    try {
+      tmpAppHandle = await safeApi.initialiseApp(appConfig, (newState) => {
+        // Callback for network state changes
+        logApi('SafeNetwork state changed to: ', newState)
+        this._isConnected = newState // TODO bugchase
+      })
+
+      logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
+      this.setSafeAppHandle(tmpAppHandle)
+      this._safeAppConfig = appConfig
+      this._safeAppPermissions = undefined
+      if (window) {
+        let connUri = await this.safeApi.genConnUri()
+        logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+
+        this._safeAuthUri = await safeApi.authorise(connUri) logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
+// ??? do I need to call anything else?
+
+        this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+      } else {
+        logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+        this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+      }
+      return this._appHandle
+    } catch (err) {
+      logApi('WARNING: ', err)
+      this.setSafeAppHandle(null)
+      throw (err)
+    }
+  }
+
+  // one-step authorisation with SAFE network - for web apps (in SAFE Browser)
   //
   // Before you can use the SafenetworkApi methods, you must authorise your application
   // with SAFE network. This function provides simplified, one step authorisation, but
@@ -794,48 +801,47 @@ class SafenetworkApi {
   //
 
   // TODO review/update/delete simpleAuthorise() - commented out for now.
-  // async simpleAuthorise (appConfig, appContainers) {
-  //   logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appContainers)
-  //
-  //   // TODO ??? not sure what I'm thinking here...
-  //   // TODO probably best to have initialise called once at start so can
-  //   // TODO access the API with or without authorisation. So: remove the
-  //   // TODO initialise call to a separate point and only call it once on
-  //   // TODO load. Need to change freeSafeAPI() or not call it above.
-  //   this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
-  //
-  //   let tmpAppHandle
-  //   try {
-  //     tmpAppHandle = await safeApi.initialize(appConfig, (newState) => {
-  //       // Callback for network state changes
-  //       logApi('SafeNetwork state changed to: ', newState)
-  //       this._isConnected = newState // TODO bugchase
-  //     })
-  //
-  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-  //     this.setSafeApi(tmpAppHandle)
-  //     this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     this._safeAppConfig = appConfig
-  //     this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
-  //
-  //     // await this.testsNoAuth();  // TODO remove (for test only)
-  //     this._safeAuthUri = this.safeApp().auth.genAthUri(this._safeAppPermissions, this._safeAppConfig.options)
-  //     await this.safeApp().auth.openUri(this._safeAuthUri)
-  //     // ???
-  //     this._safeAuthUri = await safeApi.authorise(tmpAppHandle, this._safeAppPermissions, this._safeAppConfig.options)
-  //     logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-  //
-  //     await this.safeApi.connectAuthorised(tmpAppHandle, this._safeAuthUri)
-  //     logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
-  //     await this.testsAfterAuth()  // TODO remove (for test only)
-  //     this._isAuthorised = true
-  //     return this._appHandle
-  //   } catch (err) {
-  //     logApi('WARNING: ', err)
-  //     this.setSafeApi(null)
-  //     throw (err)
-  //   }
-  // }
+  async simpleAuthorise (appConfig, appContainers) {
+    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appContainers)
+
+    // TODO ??? not sure what I'm thinking here...
+    // TODO probably best to have initialise called once at start so can
+    // TODO access the API with or without authorisation. So: remove the
+    // TODO initialise call to a separate point and only call it once on
+    // TODO load. Need to change freeSafeAPI() or not call it above.
+    this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
+
+    let tmpAppHandle
+    try {
+      tmpAppHandle = await safeApi.initialiseApp(appConfig, (newState) => {
+        // Callback for network state changes
+        logApi('SafeNetwork state changed to: ', newState)
+        this._isConnected = newState // TODO bugchase
+      })
+
+      logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
+      this.setSafeAppHandle(tmpAppHandle)
+      this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+      this._safeAppConfig = appConfig
+      this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
+
+      // await this.testsNoAuth();  // TODO remove (for test only)
+      let authReqUri = this.safeApp().auth.genAuthUri(this._safeAppPermissions, this._safeAppConfig.options)
+//???      await this.safeApp().auth.openUri(this._safeAuthUri)
+
+      this._safeAuthUri = await safeApi.authorise(authReqUri) logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
+
+      await this.safeApi.auth.loginFromUri(this._safeAuthUri)
+      logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
+      await this.testsAfterAuth()  // TODO remove (for test only)
+      this._isAuthorised = true
+      return this._appHandle
+    } catch (err) {
+      logApi('WARNING: ', err)
+      this.setSafeAppHandle(null)
+      throw (err)
+    }
+  }
 
   /* --------------------------
    * Mutable Data Helpers
@@ -3234,7 +3240,7 @@ module.exports.ERRORS = SafenetworkJsErrors
 
 /* TODO remove this and all refs to safeWeb (for current usage see README.md)
 module.exports.safeWeb = safeWeb
-module.exports.setSafeApi = SafenetworkApi.prototype.setSafeApi.bind(safeWeb)
+module.exports.setSafeAppHandle = SafenetworkApi.prototype.setSafeAppHandle.bind(safeWeb)
 module.exports.listContainer = SafenetworkApi.prototype.listContainer.bind(safeWeb)
 module.exports.testsNoAuth = SafenetworkApi.prototype.testsNoAuth.bind(safeWeb)
 module.exports.testsAfterAuth = SafenetworkApi.prototype.testsAfterAuth.bind(safeWeb)
@@ -3253,5 +3259,19 @@ module.exports.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
 module.exports.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
 /*
-*  Override window.fetch() in order to support safe:// URIs
-*/
+ *  Override window.fetch() in order to support safe:// URIs
+ */
+
+// Protocol handlers for fetch()
+const httpFetch = require('isomorphic-fetch')
+const protoFetch = require('proto-fetch')
+
+// map protocols to fetch()
+const fetch = protoFetch({
+  http: httpFetch,
+  https: httpFetch
+//  safe: safeWeb.fetch.bind(safeWeb)
+//  https: Safenetwork.fetch.bind(Safenetwork), // Debugging with SAFE mock browser
+})
+
+module.exports.protoFetch = fetch
