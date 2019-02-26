@@ -56,11 +56,9 @@ const debug = require('debug')('safenetworkjs:file')  // Web API
 const error = require('debug')('safenetworkjs:file E:')
 
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
-const safeApi = require('@maidsafe/safe-node-app')
+// TODO delete const safeApi = require('@maidsafe/safe-node-app')
 
-// const safeJsApi = require('safenetworkjs').SafenetworkApi
-// const SafeJs = require('./safenetwork-api').SafenetworkApi
-// const SAFE_ERRORS = require('./safenetwork-api').SAFE_ERRORS
+// TODO remove when missing constants are available on safeApi.CONSTANTS
 const CONSTANTS = require('./constants')
 
 const minFileDescriptor = 1
@@ -153,7 +151,8 @@ class _AllNfsFiles {
  *    createFile()               open(), write(), close(), insert()
  */
 class NfsFileState {
-  constructor (itemPath, fileFetched, hasKey) {
+  constructor (safeJs, itemPath, fileFetched, hasKey) {
+    this._safeJs = safeJs             // For safeJs.safeApi.CONSTANTS only
     this.hasKey = hasKey              // Used to decide whether to insert() or update() the entry
     this._flags = undefined           // When open, set to NFS flags (e.g. NFS_FILE_MODE_READ etc)
     this._writePos = undefined        // Tracks file position next write
@@ -192,15 +191,15 @@ class NfsFileState {
 
   isWriteable (flags) {
     if (flags === undefined) flags = this._flags
-    return flags & safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
-           flags & safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
+    return flags & this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE ||
+           flags & this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_APPEND
   }
 
   async create (nfs) {
     try {
       this._fileOpened = await nfs.open()
       if (this._fileOpened) {
-        this._flags = safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
+        this._flags = this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
         this._isModified = true
         this._versionOpened = 0
         this._writePos = 0
@@ -222,7 +221,7 @@ class NfsFileState {
       if (this.isWriteable(nfsFlags)) {
         if (this._fileFetched) {
           opened = await nfs.open(this._fileFetched, nfsFlags)
-          this._writePos = (nfsFlags === safeApi.CONSTANTS.NFS_FILE_MODE_APPEND ? await this._fileFetched.size() : 0)
+          this._writePos = (nfsFlags === this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_APPEND ? await this._fileFetched.size() : 0)
         } else {
           opened = await nfs.open()
           this._writePos = 0  // Writing to new empty file
@@ -262,7 +261,7 @@ class NfsFileState {
       if (size !== 0) throw new Error(this.constructor.name + '._truncate() not implemented for size other than zero')
 
       if (this._fileFetched) {
-        let nfsFlags = safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
+        let nfsFlags = this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_OVERWRITE
 
         // Truncate by opening for overwrite, so if already open, close first
         let leaveClosed = this._fileOpened === undefined
@@ -323,7 +322,7 @@ class NfsContainerFiles {
   _newFileState (itemPath, file, hasKey) {
     debug('%s._newFileState(\'%s\', %s, %s)', this.constructor.name, itemPath, file, hasKey)
     try {
-      let fileState = new NfsFileState(itemPath, file, hasKey)
+      let fileState = new NfsFileState(this._safeJs, itemPath, file, hasKey)
       debug('fileState: %s', fileState)
       return fileState
     } catch (e) { error(e) }
@@ -540,7 +539,7 @@ class NfsContainerFiles {
             fileState._isModified = false
             fileState._fileOpened = undefined
             fileState._versionOpened = undefined
-            if (await fileState.open(this.nfs(), safeApi.CONSTANTS.NFS_FILE_MODE_APPEND)) {
+            if (await fileState.open(this.nfs(), this._safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_APPEND)) {
               allNfsFiles.restoreFileDescriptorToCache(fdToReopen, fileState)
             } else {
               throw new Error('openFile() failed to re-open new file, closed to allow read')
@@ -698,8 +697,8 @@ class NfsContainerFiles {
    */
   async readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
-    if (pos === undefined) pos = safeApi.CONSTANTS.NFS_FILE_START
-    if (len === undefined) len = safeApi.CONSTANTS.NFS_FILE_END
+    if (pos === undefined) pos = this._safeJs.safeApi.CONSTANTS.NFS_FILE_START
+    if (len === undefined) len = this._safeJs.safeApi.CONSTANTS.NFS_FILE_END
 
     let fileState
     try {
@@ -745,8 +744,8 @@ class NfsContainerFiles {
    */
   async readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', %s, buf, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
-    if (pos === undefined) pos = safeApi.CONSTANTS.NFS_FILE_START
-    if (len === undefined) len = safeApi.CONSTANTS.NFS_FILE_END
+    if (pos === undefined) pos = this._safeJs.safeApi.CONSTANTS.NFS_FILE_START
+    if (len === undefined) len = this._safeJs.safeApi.CONSTANTS.NFS_FILE_END
 
     let fileState
     try {
