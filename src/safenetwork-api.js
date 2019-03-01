@@ -432,7 +432,7 @@ const SN_SERVICEID_LDP = 'www'  // First try 'www' to test compat with other app
 /* eslint-disable no-unused-vars */
 const isFolder = safeUtils.isFolder
 const docpart = safeUtils.docpart
-const pathpart = safeUtils.pathpart
+const itemPathPart = safeUtils.itemPathPart
 const hostpart = safeUtils.hostpart
 const protocol = safeUtils.protocol
 const parentPathNoDot = safeUtils.parentPathNoDot
@@ -558,22 +558,39 @@ class SafenetworkApi {
     this._safeAppPermissions = {}
 
     /*
-    * Access to helpers and constants via the object (useful when <script> including this JS)
+    * Making everything available on the instance removes need to maintain
+    * duplicate exports for web and node (in index-web.js and index.js):
     */
-    this.isCacheableResult = isCacheableResult
-    this.isFolder = isFolder
-    this.docpart = docpart
-    this.pathpart = pathpart
-    this.hostpart = hostpart
-    this.protocol = protocol
-    this.parentPathNoDot = parentPathNoDot
+    this.SafeContainer = containers.SafeContainer
+    this.PublicContainer = containers.PublicContainer
+    this.ServicesContainer = containers.ServicesContainer
+    this.NfsContainer = containers.NfsContainer
+    this.isCacheableResult = containers.isCacheableResult
+    this.safeUtils = safeUtils
 
+    // List of default SAFE containers (_public, _music, _publicNames etc)
+    this.defaultContainerNames = containers.defaultContainerNames
+
+    this.containerTypeCodes = containers.containerTypeCodes
+
+    this.defaultContainerPerms = defaultContainerPerms
+    this.fullPermissions = fullPermissions
+
+    this.isCacheableResult = isCacheableResult
+    this.safeUtils = safeUtils
+    this.isFolder = safeUtils.isFolder
+    this.docpart = safeUtils.docpart
+    this.itemPathPart = safeUtils.itemPathPart
+    this.hostpart = safeUtils.hostpart
+    this.protocol = safeUtils.protocol
+    this.parentPathNoDot = safeUtils.parentPathNoDot
+
+    // Constants
+    this.ERRORS = SafenetworkJsErrors
     this.SN_TAGTYPE_SERVICES = SN_TAGTYPE_SERVICES
     this.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
     this.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
     this.SN_SERVICEID_LDP = SN_SERVICEID_LDP
-
-    this.defaultContainerNames = containers.defaultContainerNames
   }
 
   enableLowBalanceWarning () {
@@ -629,16 +646,18 @@ class SafenetworkApi {
    */
   initialiseServices () {
     // Enable the standard SAFE www service API
-    this.setServiceImplementation(new SafeServiceWww(this))
-    // TODO revive:
-    // this.setServiceImplementation(new SafeServiceLDP(this))
+    // Need to implement NOT IMPLEMENTED functions on SafeServiceWww before enabling this (see implementations on SafeServicesLDP)
+    // this.setServiceImplementation(new SafeServiceWww(this))
+
+    // This is currently using 'www' instead of 'LDP' due to issue in WHM (possibly fixed)
+    this.setServiceImplementation(new SafeServiceLDP(this))
   }
 
   /*
   * Local helpers
   */
   nfsPathPart (docUri) {
-    let pathPart = this.pathpart(docUri)
+    let pathPart = this.itemPathPart(docUri)
     if (pathPart[0] === '/') {
       pathPart = pathPart.slice(1)  // safeNfs entries don't allow a leading '/'
     }
@@ -661,15 +680,17 @@ class SafenetworkApi {
     this.initialise()             // Clears active services (so DOM API handles will be discarded)
     this._appHandle = appHandle   // SAFE API application handle
 
-    // SAFE API Interfaces
-    this.safeApp = this._appHandle
-    this.auth = this._appHandle.auth
-    this.crypto = this._appHandle.crypto
-    this.cypherOpt = this._appHandle.cypterOpt
-    this.immutableData = this._appHandle.immutableData
-    this.mutableData = this._appHandle.mutableData
-    this.webFetch = this._appHandle.webFetch
-    try { this.initTests() } catch (e) { debug(e) }
+    if (appHandle) {
+      // SAFE API Interfaces
+      this.safeApp = this._appHandle
+      this.auth = this._appHandle.auth
+      this.crypto = this._appHandle.crypto
+      this.cypherOpt = this._appHandle.cypterOpt
+      this.immutableData = this._appHandle.immutableData
+      this.mutableData = this._appHandle.mutableData
+      this.webFetch = this._appHandle.webFetch
+      try { this.initTests() } catch (e) { debug(e) }
+    }
   }
 
   // Intended mainly for mock, create a container to mess with
@@ -753,7 +774,7 @@ class SafenetworkApi {
 
     let tmpAppHandle
     try {
-      tmpAppHandle = await safeApi.initialiseApp(appConfig, (newState) => {
+      tmpAppHandle = await this.safeApi.initialiseApp(appConfig, (newState) => {
         // Callback for network state changes
         logApi('SafeNetwork state changed to: ', newState)
         this._isConnected = newState // TODO bugchase
@@ -764,10 +785,11 @@ class SafenetworkApi {
       this._safeAppConfig = appConfig
       this._safeAppPermissions = undefined
       if (window) {
-        let connUri = await this.safeApi.genConnUri()
+        let connUri = await this.auth.genConnUri()
         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
 
-        this._safeAuthUri = await safeApi.authorise(connUri) logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
+        this._safeAuthUri = await this.safeApi.authorise(connUri)
+        logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 // ??? do I need to call anything else?
 
         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
@@ -809,11 +831,15 @@ class SafenetworkApi {
     // TODO access the API with or without authorisation. So: remove the
     // TODO initialise call to a separate point and only call it once on
     // TODO load. Need to change freeSafeAPI() or not call it above.
+    //
+    // TODO I think once I have this._safeAuthUri I should be able
+    // TODO to just try auth.loginFromUri() with that to skip the UI prompts
+
     this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
 
     let tmpAppHandle
     try {
-      tmpAppHandle = await safeApi.initialiseApp(appConfig, (newState) => {
+      tmpAppHandle = await this.safeApi.initialiseApp(appConfig, (newState) => {
         // Callback for network state changes
         logApi('SafeNetwork state changed to: ', newState)
         this._isConnected = newState // TODO bugchase
@@ -826,12 +852,11 @@ class SafenetworkApi {
       this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
 
       // await this.testsNoAuth();  // TODO remove (for test only)
-      let authReqUri = this.safeApp().auth.genAuthUri(this._safeAppPermissions, this._safeAppConfig.options)
-//???      await this.safeApp().auth.openUri(this._safeAuthUri)
+      let authReqUri = await this.auth.genAuthUri(this._safeAppPermissions, this._safeAppConfig.options)
+      this._safeAuthUri = await this.safeApi.authorise(authReqUri)
+      logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 
-      this._safeAuthUri = await safeApi.authorise(authReqUri) logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-
-      await this.safeApi.auth.loginFromUri(this._safeAuthUri)
+      await this.auth.loginFromUri(this._safeAuthUri)
       logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
       await this.testsAfterAuth()  // TODO remove (for test only)
       this._isAuthorised = true
@@ -847,29 +872,6 @@ class SafenetworkApi {
    * Mutable Data Helpers
    * --------------------------
    */
- //
- //
-  /**
-   * Get a list of Mutable Data Entries which excludes deleted entries
-   *
-   * @param  {MutableData}  mData
-   * @return {Promise}       Array of Entry, ie { Key, ValueVersion }
-   */
-  async activeEntriesList (mData) {
-    let entriesList = []
-    try {
-      // TODO revert to safe-node-app v0.9.1 code:
-      // let entries = await this._mData.getEntries()
-      // let entriesList = await entries.listEntries()
-      // entriesList.forEach(async (entry) => {
-
-      let entries = await mData.getEntries()
-      entries.forEach(async (key, val) => {
-      })
-    } catch (e) { debug(e) }
-
-    return entriesList
-  }
 
   /**
     * Insert, update, or delete (clear) an entry in a Mutable Data
@@ -973,7 +975,7 @@ class SafenetworkApi {
   /* --------------------------
    * Simplified SAFE Containers
    * --------------------------
-  p *
+   *
    * Several classes are provided to allow simpler programming of
    * the standard containers for common operations.
    *
@@ -1049,7 +1051,7 @@ class SafenetworkApi {
         let parent              // URI based NFS container has no parent
         container = new NfsContainer(this, service.getServiceValue(), containerPath, parent, false)
         await container.initialise()
-        container._subTree = safeUtils.itemPathpart(safeUri)  // Optionally mounts a subdirectory of the NFS container
+        container._subTree = safeUtils.itemPathPart(safeUri)  // Optionally mounts a subdirectory of the NFS container
       } else {
         throw new Error('failed to get ServiceInterface for %s', safeUri)
       }
@@ -1212,7 +1214,7 @@ class SafenetworkApi {
     try {
       // TODO wrap access to some MDs (eg for _publicNames container) in a getter that is passed permissions
       // TODO checks those permissions, gets the MD, and caches the value, or returns it immediately if not null
-      let publicNamesMd = await this.safeApi.getContainer('_publicNames')
+      let publicNamesMd = await this.auth.getContainer('_publicNames')
       let entries = await publicNamesMd.getEntries()
       let entryKey = this.makePublicNamesEntryKey(publicName)
       let encryptedKey = await publicNamesMd.encryptKey(entryKey)
@@ -1344,9 +1346,9 @@ class SafenetworkApi {
       // TODO clarify what setting these permissions does - and if it means user can modify with another app (e.g. try with WHM)
       let pmSet = ['Read', 'Update', 'Insert', 'Delete', 'ManagePermissions']
       let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
-      let pmHandle = await this.mutableData.newPermissions(this.safeApp)
-      await this.mutableDataPermissions.insertPermissionsSet(pmHandle, pubKey, pmSet)
-      await md.put(pmHandle, entriesHandle)
+      let permissions = await this.mutableData.newPermissions(this.safeApp)
+      await permissions.insertPermissionSet(pubKey, pmSet)
+      await md.put(permissions, entriesHandle)
       let nameAndTag = await md.getNameAndTag()
 
       // TODO BUG subfolder: try with 'posts/rand/', to chase bug in _getFolder() where we have a subfolder
@@ -1398,7 +1400,6 @@ class SafenetworkApi {
 
       let servicesMd = await this.getServicesMdFor(host)
       serviceValue = await service.setupServiceForHost(host, servicesMd)
-      this.mutableData.free(servicesMd)
     } catch (err) {
       throw new Error('Failed to set up service \'' + serviceId + '\' - Error: ' + err)
     }
@@ -1462,20 +1463,17 @@ class SafenetworkApi {
       let pmSet = ['Read', 'Update', 'Insert', 'Delete', 'ManagePermissions']
       let pubKey = await this.crypto.getAppPubSignKey(this.safeApp)
       let permissions = await this.mutableData.newPermissions(this.safeApp)
-      await permissions.insertPermissionsSet(pubKey, pmSet)
+      await permissions.insertPermissionSet(pubKey, pmSet)
       await servicesMd.put(permissions, servicesEntries)
 
       // TODO do I also need to set metadata?
       // TODO - see: http://docs.maidsafe.net/beaker-plugin-safe-app/#windowsafemutabledatasetmetadata
-      // TODO free stuff!
-      // TODO   - pubKey? - ask why no free() functions for cyrpto library handles)
-      // TODO   - servicesEntriesHandle (this.mutableData.newEntries doesn't say it should be freed)
 
       // TODO remove (test only):
       let r = await servicesMd.getNameAndTag()
       logApi('servicesMd created with tag: ', r.typeTag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
-      let publicNamesMd = await this.safeApi.getContainer('_publicNames')
+      let publicNamesMd = await this.auth.getContainer('_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
       let entries = await publicNamesMd.getEntries()
       let namesMutation = await entries.mutate()
@@ -1547,7 +1545,6 @@ class SafenetworkApi {
   // @param host (or public-name), where host=[profile.]public-name
   //
   // @returns promise which resolves to the services MD of the given name
-  // You should free() the returned handle with this.mutableData.free
   async getServicesMdFor (host) {
     logApi('getServicesMdFor(%s)', host)
     let publicName = host.split('.')[1]
@@ -1581,7 +1578,6 @@ class SafenetworkApi {
   // @param host (or public-name), where host=[profile.]public-name
   //
   // @returns promise which resolves to the services MD of the given name, or null
-  // You should free() the returned handle with this.mutableData.free
   async getServicesMdFromContainers (host) {
     logApi('getServicesMdFromContainers(%s)', host)
     try {
@@ -1592,10 +1588,11 @@ class SafenetworkApi {
       logApi("host '%s' has publicName '%s'", host, publicName)
 
       let nameKey = this.makePublicNamesEntryKey(publicName)
-      let md = await this.safeApi.getContainer('_publicNames')
+      let md = await this.auth.getContainer('_publicNames')
       logApi('_publicNames ----------- start ----------------')
       let entries = await md.getEntries()
-      await entries.forEach((k, v) => {
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach((k, v) => {
         logApi('Key: ', k.toString())
         logApi('Value: ', v.buf.toString())
         logApi('Version: ', v.version)
@@ -1937,7 +1934,7 @@ class SafenetworkApi {
       logApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
 
       try {
-        response = await this.safeApi.webFetch(docUri, options)
+        response = await this.safeApp.webFetch(docUri, options)
       } catch (err) {
         logApi('%s._fetch() error: %s', this.constructor.name, err)
         response = new Response(null, {status: 404, statusText: '404 Not Found'})
@@ -2051,34 +2048,36 @@ class SafenetworkApi {
   async listContainer (containerName) {
     logTest('listContainer(%s)...', containerName)
     logTest(containerName + ' ----------- start ----------------')
-    let md = await this.safeApi.getContainer(containerName)
+    let md = await this.auth.getContainer(containerName)
     await this.listMd(md, containerName)
     logTest(containerName + '------------ end -----------------')
   }
 
   async listMd (md, name) {
-    let entries = await md.getEntries()
     logTest('list md: %s', md)
-    await entries.forEach(async (k, v) => {
-      let plainKey = k
-      try { plainKey = await md.decrypt(k) } catch (e) { debug('Key decryption ERROR: %s', e) }
-      let plainValue = v.buf
-      try { plainValue = await md.decrypt(v.buf) } catch (e) { debug('Value decryption ERROR: %s', e) }
-      let enc = new TextDecoder()
+    let enc = new TextDecoder()
+    let entries = await md.getEntries()
 
+    let entriesList = await entries.listEntries()
+    await entriesList.forEach(async (entry) => {
+      let decodedEntry = entry
+      let plainKey = entry.key
+      try { plainKey = await md.decrypt(plainKey) } catch (e) { debug('Key decryption ERROR: %s', e) }
       plainKey = enc.decode(new Uint8Array(plainKey))
-      if (plainKey !== k.toString())
-        logTest('%s Key (encrypted): ', name, k.toString())
+      if (plainKey !== entry.key.toString())
+        logTest('Key (encrypted): ', entry.key.toString())
+      logTest('Key            : ', plainKey)
+      decodedEntry.plainKey = plainKey
 
-      logTest('%s Key            : ', name, plainKey)
-
+      let plainValue = entry.value.buf
+      try { plainValue = await md.decrypt(plainValue) } catch (e) { debug('Value decryption ERROR: %s', e) }
       plainValue = enc.decode(new Uint8Array(plainValue))
-      if (plainValue !== v.buf.toString() )
-        logTest('%s Value (encrypted): ', name, v.buf.toString())
+      if (plainValue !== entry.value.buf.toString())
+        logTest('Value (encrypted): ', entry.value.buf.toString())
+      logTest('Value            :', plainValue)
 
-      logTest('%s Value            :', name, plainValue)
-
-      logTest('%s Version: ', name, v.version)
+      logTest('Version: ', entry.value.version)
+      decodedEntry.plainValue = plainValue
     })
   }
   // //// END of debugging helpers
@@ -2148,7 +2147,7 @@ class ServiceInterface {
   //
   // @returns a promise which resolves to the services entry value for this service
   async setupServiceForHost (host, servicesMd) {
-    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', host, this.constructor.name, servicesMd)
+    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
     throw new Error('ServiceInterface.setupServiceForHost() not implemented for ' + this.getName() + ' service')
     /* Example:
     TODO
@@ -2237,7 +2236,7 @@ class SafeServiceWww extends ServiceInterface {
     // and so a www service must be set up using another application such as
     // the Maidsafe Web Hosting Manager example. This can't be done here
     // because the user must specify a name for a public container.
-    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', host, this.constructor.name, servicesMd)
+    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
     throw ('%s.setupServiceForHost() not implemented for ' + this.getName() + ' service', this.constructor.name)
 
     /* Example:
@@ -2266,8 +2265,8 @@ class SafeServiceWww extends ServiceInterface {
   //
   // @returns see window.fetch() and your services specification
   async _fetch () {
-    logApi('%s._fetch(%o) calling this.safeApi.webFetch()', this.constructor.name, arguments)
-    return this.safeApi.webFetch.apply(null, arguments)
+    logApi('%s._fetch(%o) calling this.safeApp.webFetch()', this.constructor.name, arguments)
+    return this.safeApp.webFetch.apply(null, arguments)
   }
 }
 
@@ -2287,7 +2286,13 @@ class SafeServiceWww extends ServiceInterface {
 *  Linked Data Platform Primer (http://www.w3.org/TR/2015/NOTE-ldp-primer-20150423/)
 *  HTTP/1.1 Status Code Definitions (https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html)
 */
-//
+
+const mime = require('mime-types')
+const $rdf = require('rdflib')
+const ns = require('solid-namespace')($rdf)
+
+// TODO update to use SafeNfsContainer instead of calling SAFE NFS APIs
+
 class SafeServiceLDP extends ServiceInterface {
   constructor (safeWeb) {
     super(safeWeb)
@@ -2355,7 +2360,7 @@ class SafeServiceLDP extends ServiceInterface {
     this.setHandler('DELETE', this.delete)
   }
 
-  // TODO copy theses function header comments to above, (also example code)
+  // TODO copy theses function header comments to ServiceInterface, (also example code)
   // Initialise a services MD with an entry for this host
   //
   // User must grant permission on a services MD, and probably also the
@@ -2405,7 +2410,7 @@ class SafeServiceLDP extends ServiceInterface {
     return serviceValue
   }
 
-  // TODO copy theses function header comments to above, (also example code)
+  // TODO copy theses function header comments to ServiceInterface, (also example code)
   // Create an instance of a service inistalised for a given host
   //  - create and intitialise a new instance of this service implementation
   //
@@ -2439,7 +2444,7 @@ class SafeServiceLDP extends ServiceInterface {
 
     logLdp('storageNfs()')
     try {
-      this._storageNfs = await this.storageMd().emulateAs('NFS')
+      this._storageNfs = await (await this.storageMd()).emulateAs('NFS')
       logLdp('this.storageMd: %s', await this.storageMd())
       /* TODO remove debug code:
       logLdp('DEBUG this._storageNfs: %s', this._storageNfs)
@@ -2468,7 +2473,7 @@ class SafeServiceLDP extends ServiceInterface {
 
     try {
       // The service value is the address of the storage container (Mutable Data)
-      this._storageMd = await this.mutableData.newPublic(this.getServiceValue().buf, this.getTagType())
+      this._storageMd = await this.appHandle().mutableData.newPublic(this.getServiceValue().buf, this.getTagType())
       // TODO remove this existence check:
       await this._storageMd.getVersion()
 
@@ -2540,7 +2545,7 @@ class SafeServiceLDP extends ServiceInterface {
         // mrhTODO response.status checks for versions are untested
         logLdp('%s.put putDone(status: ' + response.status + ') for path: %s', this.constructor.name, docUri)
         if (response.status >= 200 && response.status < 300) {
-          let fileInfo = await this._getFileInfo(pathpart(docUri))
+          let fileInfo = await this._getFileInfo(itemPathPart(docUri))
           var etagWithoutQuotes = (typeof (fileInfo.ETag) === 'string' ? fileInfo.ETag : undefined)
           let res = new Response(null, {
             status: 200, headers: new Headers({
@@ -2565,7 +2570,7 @@ class SafeServiceLDP extends ServiceInterface {
     }
 
     try {
-      let fileInfo = await this._getFileInfo(pathpart(docUri))
+      let fileInfo = await this._getFileInfo(itemPathPart(docUri))
       if (fileInfo) {
         if (options && (options.ifNoneMatch === '*')) { // Entity exists, version irrelevant)
           return putDone(docUri, options, { status: 412, statusText: 'Precondition failed' })
@@ -2596,7 +2601,7 @@ class SafeServiceLDP extends ServiceInterface {
     let docPath = this.safeWeb().nfsPathPart(docUri)
 
     try {
-      let fileInfo = await this._getFileInfo(pathpart(docUri))
+      let fileInfo = await this._getFileInfo(itemPathPart(docUri))
       if (!fileInfo) {
         return new Response(null, {status: 404, statusText: '404 Not Found'})
       }
@@ -2764,10 +2769,7 @@ class SafeServiceLDP extends ServiceInterface {
       if (options && options.ifNoneMatch && etagWithoutQuotes && (etagWithoutQuotes === options.ifNoneMatch)) {
         return new Response(null, {status: 304, statusText: '304 Not Modified'})
       }
-/* ??? Note, for LDP service need to add:
-const mime = require('mime-types')
-const ns = require('solid-namespace')($rdf)
-*/
+
       var contentType = mime.lookup(docPath) || this.DEFAULT_CONTENT_TYPE
       if (safeUtils.hasSuffix(docPath, this.turtleExtensions)) {
         contentType = 'text/turtle'
@@ -2871,17 +2873,18 @@ const ns = require('solid-namespace')($rdf)
     rdfGraph.add(resourceGraph.sym(docUri), ns.rdf('type'), ns.ldp('Container'))
 
     try {
-      debug('safe:TMP')('1')
+      debug('safe:TMP 1')
       // Create listing by enumerating container keys beginning with docPath
       const directoryEntries = []
       let entries = await (await this.storageMd()).getEntries()
-      debug('safe:TMP')('2')
-      await entries.forEach(async (k, v) => {
-        debug('safe:TMP')('3')
+      let entriesList = await entries.listEntries()
+      debug('safe:TMP 2')
+      entriesList.forEach(async (k, v) => {
+        debug('safe:TMP 3')
         // Skip deleted entries
         if (v.buf.length === 0) {
           // TODO try without this...
-          debug('safe:TMP')('4')
+          debug('safe:TMP 4')
           return true  // Next
         }
         logLdp('Key: ', k.toString())
@@ -2894,7 +2897,7 @@ const ns = require('solid-namespace')($rdf)
         var key = k.toString()
         // If the folder matches the start of the key, the key is within the folder
         if (key.length > dirPath.length && key.substr(0, dirPath.length) === dirPath) {
-          debug('safe:TMP')('5')
+          debug('safe:TMP 5')
           var remainder = key.slice(dirPath.length)
           var itemName = remainder // File name will be up to but excluding first '/'
           var firstSlash = remainder.indexOf('/')
@@ -2903,27 +2906,27 @@ const ns = require('solid-namespace')($rdf)
           }
 
           if (options.includeBody) {
-            debug('safe:TMP')('6')
+            debug('safe:TMP 6')
             let testPath = docPath + this.suffixMeta
             let fullItemUri = docUri + itemName
             let metaFilePath
 
             try {
-              debug('safe:TMP')('7')
-              /*              if (await this.mutableDataEntries.get(entriesHandle, testPath)) {
+              debug('safe:TMP 7')
+              /*              if (await this.appHandle().mutableDataEntries.get(entriesHandle, testPath)) {
               metaFilePath = testPath
             }
             */            } catch (err) {
-            debug('safe:TMP')('8')
+            debug('safe:TMP 8')
           } // metaFilePath - file not found
           logLdp('calling _addListingEntry for %s', itemName)
           directoryEntries.push(this._addListingEntry(rdfGraph, fullItemUri, docUri, itemName, metaFilePath))
-          debug('safe:TMP')('9')
+          debug('safe:TMP 9')
         }
       }
     })
-    .then(async _ => Promise.all(directoryEntries)
-    .then(async _ => {
+
+    await Promise.all(directoryEntries).then(async _ => {
       logLdp('Iteration finished')
       //        let triples = await new $rdf.Serializer(rdfGraph).toN3(rdfGraph)
 
@@ -2949,7 +2952,8 @@ const ns = require('solid-namespace')($rdf)
         logLdp('%s._getFolder(\'%s\', ...) response %s body:\n %s', this.constructor.name, docUri, response.status, triples)
 
         return response
-      })).catch((e) => debug(e.message))
+      }).catch((e) => debug(e.message))
+
     } catch (err) { // TODO review error handling and responses
       logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
       // TODO are their any SAFE API codes we need to detect?
@@ -2962,7 +2966,7 @@ const ns = require('solid-namespace')($rdf)
   // Adds a entry to directory listing (file or folder to the RDF graph)
   async _addListingEntry (resourceGraph, fullItemUri, containerUri, itemName, metaFilePath) {
     logLdp('%s._addListingEntry(g,%s,%s,%s,%s)', this.constructor.name, fullItemUri, containerUri, itemName, metaFilePath)
-    let fileInfo = await this._getFileInfo(pathpart(fullItemUri))
+    let fileInfo = await this._getFileInfo(itemPathPart(fullItemUri))
     resourceGraph = await this._addFileInfo(resourceGraph, fullItemUri, fileInfo)
 
     // Add to `contains` list
@@ -3213,23 +3217,8 @@ const ns = require('solid-namespace')($rdf)
 // Usage: create the web API and install the built in services
 // let safeWeb = new SafenetworkApi()
 
-module.exports = SafenetworkApi
+module.exports.SafenetworkApi = SafenetworkApi
 
-module.exports.SafeContainer = containers.SafeContainer
-module.exports.PublicContainer = containers.PublicContainer
-module.exports.ServicesContainer = containers.ServicesContainer
-module.exports.NfsContainer = containers.NfsContainer
-module.exports.isCacheableResult = containers.isCacheableResult
-module.exports.safeUtils = safeUtils
-
-// Constants
-module.exports.defaultContainerNames = containers.defaultContainerNames // List of default SAFE containers (_public, _music, _publicNames etc)
-module.exports.containerTypeCodes = containers.containerTypeCodes
-
-module.exports.defaultContainerPerms = defaultContainerPerms
-module.exports.fullPermissions = fullPermissions
-
-module.exports.ERRORS = SafenetworkJsErrors
 // module.exports.SAFE_ERRORS = SafeApiErrors
 
 // TODO ??? change to export class, something like this (example rdflib Fetcher.js)
@@ -3245,18 +3234,6 @@ module.exports.listContainer = SafenetworkApi.prototype.listContainer.bind(safeW
 module.exports.testsNoAuth = SafenetworkApi.prototype.testsNoAuth.bind(safeWeb)
 module.exports.testsAfterAuth = SafenetworkApi.prototype.testsAfterAuth.bind(safeWeb)
 */
-
-module.exports.safeUtils = safeUtils
-module.exports.isFolder = safeUtils.isFolder
-module.exports.docpart = safeUtils.docpart
-module.exports.pathpart = safeUtils.pathpart
-module.exports.hostpart = safeUtils.hostpart
-module.exports.protocol = safeUtils.protocol
-module.exports.parentPathNoDot = safeUtils.parentPathNoDot
-
-module.exports.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
-module.exports.SN_TAGTYPE_LDP = SN_TAGTYPE_LDP
-module.exports.SN_SERVICEID_LDP = SN_SERVICEID_LDP
 
 /*
  *  Override window.fetch() in order to support safe:// URIs

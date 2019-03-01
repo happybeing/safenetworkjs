@@ -1,19 +1,20 @@
-// Get SAFE API from Browser window
+// SAFE Client Libs API is attached to SAFE Browser window
 if (typeof window === 'undefined') {
-  console.log('ERROR: Browser window is undefined')
-  throw new Error('ERROR: Browser window is undefined')
+  let errMsg = 'ERROR: SAFE Browser window is undefined'
+  console.log(errMsg)
+  throw new Error(errMsg)
 }
 
-// Core SAFE API functionality
-const SafenetworkApi = require('./safenetwork-api')
-SafenetworkApi.safeApi = this.safeApi
+// SafenetworkJs library
+const Safenetworkjs = require('./safenetwork-api')
 
-// SafenetworkApi plus filesystem support
-// const SafenetworkFs = require('./safenetwork-fs')
+// SafenetworkApi class
+exports = module.exports = Safenetworkjs.SafenetworkApi
+module.exports.SafenetworkApi = Safenetworkjs.SafenetworkApi
 
-let safeNetworkJsApi = new SafenetworkApi
-safeNetworkJsApi.safeApi = this.safeApi
+// SafenetworkApi instance with SAFE Client Libs API
+const safeJs = new Safenetworkjs.SafenetworkApi
+safeJs.safeApi = window.safe
+module.exports.safeJs = safeJs
 
-exports = module.exports = SafenetworkApi
-module.exports.SafenetworkApi = new SafenetworkApi
-// module.exports.SafenetworkFs = new SafenetworkFs
+module.exports.protoFetch = Safenetworkjs.protoFetch

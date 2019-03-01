@@ -1581,7 +1581,7 @@ class ServicesContainer extends SafeContainer {
         this._mdName = valueVersion.value
       }
 
-      this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
+      this._mData = await this._safeJs.mutableData.newPublic(this._mdName, this._tagType)
       this._mdVersion = await this._mDate.getVersion()  // This verifies it exists
     } catch (err) {
       let info = (this._parent ? this._parent.name + '/' + this._parentEntryKey : this._mdName)
@@ -1840,7 +1840,7 @@ class NfsContainer extends SafeContainer {
         this._mdName = valueVersion.value
       }
 
-      this._mData = await this._safeJs.mutableData().newPublic(this._mdName, this._tagType)
+      this._mData = await this._safeJs.mutableData.newPublic(this._mdName, this._tagType)
     } catch (err) {
       let info = (this._parent ? this._parent.name + '/' + this._parentEntryKey : this._mdName)
       debug('NfsContainer failed to init existing MD for ' + info)

@@ -21,7 +21,7 @@ const docpart = function (uri) {
 }
 
 // Return full document itemPath from root (strips host and fragment)
-const itemPathpart = function (uri) {
+const itemPathPart = function (uri) {
   let hostlen = hostpart(uri).length
   uri = uri.slice(protocol(uri).length)
   if (uri.indexOf('://') === 0) {
@@ -194,7 +194,7 @@ module.exports.path = path
  */
 module.exports.isFolder = isFolder
 module.exports.docpart = docpart
-module.exports.itemPathpart = itemPathpart
+module.exports.itemPathPart = itemPathPart
 module.exports.hostpart = hostpart
 module.exports.protocol = protocol
 module.exports.parentPath = parentPath

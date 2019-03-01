@@ -1,23 +1,30 @@
 {
   "name": "safenetworkjs",
   "version": "0.0.1",
-  "description": "SAFE Network API for NodeJS (for browser see safenetwork-webapi)",
-  "main": "src/index.js",
-  "scripts": {
-    "doc": "jsdoc src -r -d docs || true"
-  },
+  "description": "SAFE Network API for NodeJS and Web",
   "author": "theWebalyst",
   "license": "GPL-3.0",
-  "repository": {
-    "type": "git"
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo No tests yet!",
+    "doc": "jsdoc src -r -d docs || true",
+    "build": "webpack --mode production --verbose --colors --config webpack.config.js",
+    "dev": "webpack --watch --mode development --verbose --colors --config webpack.config.js"
   },
-  "url": "git+https://github.com/theWebalyst/safenetworkjs.git",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thewebalyst/safenetworkjs.git"
+  },
   "dependencies": {
     "@maidsafe/safe-node-app": "^0.10.3",
     "debug": "^4.1.1",
     "fast-text-encoding": "^1.0.0",
+    "isomorphic-fetch": "^2.2.1",
     "node-ipc": "^9.1.1",
     "path": "^0.12.7",
+    "proto-fetch": "^1.0.0",
+    "rdflib": "^0.19.1",
+    "solid-namespace": "^0.2.0",
     "string": "^3.3.3"
   },
   "bugs": {
@@ -31,6 +38,12 @@
     "api"
   ],
   "devDependencies": {
-    "jsdoc": "^3.5.5"
+    "@babel/core": "^7.3.3",
+    "babel": "^6.23.0",
+    "babel-loader": "^8.0.5",
+    "copy-webpack-plugin": "^5.0.0",
+    "jsdoc": "^3.5.5",
+    "webpack": "^4.29.5",
+    "webpack-cli": "^3.2.3"
   }
 }
