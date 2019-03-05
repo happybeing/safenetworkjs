@@ -113,12 +113,31 @@
         no obvious efficiencies in my code.
         See Maidsafe response:
         https://forum.safedev.org/t/what-in-the-api-causes-get/2008/5?u=happybeing
-    [/] saveFile(path, [create])
-    [/] copyFile(src, dest)
-    [/] moveFile(src, dest) (rename)
-    [/] deleteFile(path)
-    [/] speed up: getattr() cache?
-    [ ] Support for Directories/Folders
+    [ ] On SafenetworkApi:
+      [ ] saveFile(path, contents)
+      [ ] loadFile(src)
+      [ ] copyFile(src, dest)
+      [ ] renameFile(from, to)
+      [ ] deleteFile(path)
+      [ ] fileInfo(path)
+      [ ] listFolder(path)
+      [ ] Support for Directories/Folders
+    [ ] On SafeContainer / NfsContainer / NfsContainerFiles:
+      [/] openFile(path)
+      [/] createFile(path)
+      [/] readFile(path, fd)
+      [/] readFileBuf(path, fd)
+      [/] writeFile(path, fd, ...)
+      [/] writeFileBuf(path, fd, ...)
+      [/] _truncateFile(path, fd, size)
+      [/] closeFile(path)
+      [/] deleteFile(path)
+      [/] renameFile(src, dest) (move)
+      [ ] copyFile(src, dest) (exists on _NfsContainerFiles)
+      [ ] getFileMetadata(path)
+      [ ] setFileMetadata(path)
+      [ ] Support for Directories/Folders
+      [/] speed up: getattr() cache?
         DESIGN
       [/] implement a way for each NFS Container to call FUSE cache invalidation
           functions for each FUSE path at which a path appears. How? Perhaps
@@ -184,7 +203,6 @@
         - this is a harder issue, but in the short term we could just
           call getattr() on the folder at the end of every unlink()
           and see how that works.
-    [ ] fileExists(path)
   [/] _webMounts of arbitrary public websites
     -> BRANCH dev-mounturi
     [/] fixup old services code
@@ -317,49 +335,39 @@ LATER
   [ ] update safe-cli-boilerplate to use SafenetworkJs bootstrap.js (as safenetwork-fuse now does)
 */
 
-/*
-* SafenetworkJS - Application API for SAFE Network (base level)
+/**
+* SafenetworkApi - Application API for SAFE Network (base level)
 *
-* This provides essential and utility features to build a NodeJS app.
+* Core and utility features an in Browser SAFE Web App or SAFE NodeJS Desktop App.
 *
-* Use this in combination with related safenetwork modules, proposed:
-* - FS API - filesystem features (safenetwork-fs.js)
-* - Web API - RESTful Standard Web (safenetwork-web.js + safenetwork-webservices.js)
+* SafenetworkApi supports authorisation, public names, services
+* SAFE containers, simple file operations, mutable data and immutable data.
+*
+* Companion classes provide more complex capabilities such as managing SAFE
+* NFS Containers, providing custom RESTful services etc.
+*
+* Access to the underlying SAFE Network APIs is also available if needed.
 
 TODO: these notes were written early in the design so need review and update:
       - some ideas may have changed
       - some things may not yet be implemented
 
-safenetworkjs and safenetwork-web
-=================================
-TODO update this if I can eliminate safenetwork-web
-
-safenetworkjs (this module)
--------------
-Is a NodeJS module for building Node apps which you can run from the
-desktop, or use to create stand-alone cross platform apps using the
+You can use NodeJS modules in your code, targeting web or desktop, and even
+using NodeJS you can create stand-alone cross platform apps using the
 safe-cli-boilerplate to package them for Windows, Mac OS and Linux.
 
-- includes almost all the Web code because apps can do Web access using safeApp.webFetch()
-- provides a wrapper for webFetch() so a desktop or command line application can access SAFE as a RESTful client
-
-safenetwork-web (related module for web apps)
----------------
-Uses safenetworkjs to provide the same features for web apps running in
-the browser.
-
-- provides a safe: fetch (using proto-fetch) which redirects to safenetworkjs webFetch() so a web application can access SAFE as a RESTful web client
-- builds a bundle suitable for a Web application
+Provides a wrapper for webFetch() so web services can easily be emulated
+for code that expects are RESTful interface (without modifying the RESTful client). These features can be used in desktop or command line applications
+as well as web apps.
 
 See also: http://docs.maidsafe.net/safe_app_nodejs/#safeappwebfetch
 
 Architecture
 ============
+TODO review SafenetworkJs class architecture:
+
 The plan is to create a base class (SafenetworkApi) and extend this first
 to class SafenetworkFs.
-
-SafenetworkWeb extends SafenetworkFS, but is a separate module
-because it is built for use in the browser.
 
 I considered trying to make it possible to just pull in the base plus
 whichever feature(s) you wanted with the other modules sitting on top,
@@ -379,6 +387,7 @@ Features generic JSON i/f for:
 - later, maybe also MData/IData and so on
 
 */
+
 
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
@@ -462,7 +471,7 @@ const getBaseUri = safeUtils.getBaseUri
 */
 
 // For connection without authorisation (see initReadOnly)
-const untrustedAppConfig = {
+const untrustedAppInfo = {
   id: 'Untrusted',
   name: 'Do NOT authorise this app',
   vendor: 'Untrusted'
@@ -494,15 +503,15 @@ const defaultContainerPerms = {
   NfsContainer: ['Read', 'Insert', 'Update', 'Delete'] // TODO maybe reduce defaults later
 }
 
-/*
+/**
 * NodeJS API for SAFEnetwork
 * - app initialisation
 * - connection and authorisation with SAFE Network
 * - public IDs and services
+* - simplified file operations
 * - mutable data
 * - immutable data
 *
-* For filesystem support, see safenetwork.js
 *
 * @Params
 *  appHandle - SAFE API app handle or null
@@ -510,15 +519,10 @@ const defaultContainerPerms = {
 */
 
 class SafenetworkApi {
-  /*
-  * Service interface template for each service implementation
-  *
-  * DRAFT spec: https://forum.safedev.org/t/safe-services-npm-module/1334
-  */
 
   constructor () {
     logApi('SafenetworkApi()')
-    this._safeAppConfig = undefined
+    this._safeAppInfo = undefined
     this._safeAppContainers = undefined
     this._safeContainerOpts = undefined
     this._safeAuthUri = undefined
@@ -554,7 +558,7 @@ class SafenetworkApi {
     this._nfsContainers = {}      // Active NfsContainer objects
 
     // Application specific configuration required for authorisation
-    this._safeAppConfig = {}
+    this._safeAppInfo = {}
     this._safeAppPermissions = {}
 
     /*
@@ -652,10 +656,124 @@ class SafenetworkApi {
     // This is currently using 'www' instead of 'LDP' due to issue in WHM (possibly fixed)
     this.setServiceImplementation(new SafeServiceLDP(this))
   }
+  /**
+   * Simplified file API (modeled loosely on CRUD)
+   *
+   */
 
-  /*
+   /**
+    * Save the content as an immutable file at a given URI.
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} fileUri
+    * @param  {Object} contents
+    * @return {Promise}
+    */
+   async saveFile (fileUri, contents) {
+     debug('%s.safeFile(\'%s\', contents) - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * Load the content from an immutable file at a given URI.
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} fileUri
+    * @return {Promise} the data read from the file
+    */
+   loadFile (fileUri) {
+     debug('%s.loadFile(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * Get metadata and status about a file. Can be used to test if file exists.
+    *
+    * @param  {String} fileUri
+    * @return {Promise} an object containing metadata about the file
+    */
+   fileInfo (fileUri) {
+     debug('%s.fileInfo(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * Delete the file at a URI.
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} fileUri
+    * @return {Promise} an object indicating the success or reason for failure
+    */
+   deleteFile (fileUri) {
+     debug('%s.deleteFile(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * Copy a file.
+    *
+    * If both URIs refer to the same container, only the container entries
+    * are updated (ie the immutable data object is re-used)
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} fromUri
+    * @param  {String} toUri
+    * @return {Promise} an object indicating the success or reason for failure
+    */
+   copyFile (fromUri, toUri) {
+     debug('%s.copyFile(\'%s\', \'%s\') - NOT IMPLEMENTED', this.constructor.name, fromUri, toUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * Rename/move a file.
+    *
+    * If both URIs refer to the same container, only the container entries
+    * are updated (ie the immutable data object is re-used)
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} fileUri
+    * @return {Promise} an object indicating the success or reason for failure
+    */
+   renameFile  (fileUri) {
+     debug('%s.renameFile(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
+    * List the content of a folder at a URI ending with a '/'
+    *
+    * The user must have granted, or be able to grant suitable access rights
+    * if prompted by SAFE Browser.
+    *
+    * @param  {String} folderUri (must end with '/')
+    * @return {Promise} An list of files and sub-folders, (folders end with a '/') or null if the directory does not exist.
+    */
+   listFolder  (folderUri) {
+     debug('%s.listFolder(\'%s\') - NOT IMPLEMENTED', this.constructor.name, folderUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+  /**
   * Local helpers
   */
+
+  /**
+   * Get the NFS container path after the public name from a URI
+   *
+   * @param  {String} docUri SAFE URI of a document or file
+   * @return {String} full document path (without a leading '/')
+   */
   nfsPathPart (docUri) {
     let pathPart = this.itemPathPart(docUri)
     if (pathPart[0] === '/') {
@@ -668,13 +786,14 @@ class SafenetworkApi {
   * Application API - authorisation with SAFE network
   */
 
-  // Set SAFE DOM API application handle
-  //
-  // If application does its own safeApp.initialise, it must call setSafeAppHandle()
-  // Application can call this again if it wants to clear/refresh DOM API handles
-  //
-  // @param a DOM API SAFEAppHandle, see this.safeApi.initialise()
-  //
+  /**
+   * Set SAFE API application handle (needed if you init with SAFE API directly)
+   *
+   * Note: if the application calls safeApp.initialiseApp() directly it MUST
+   * pass the SAFEApp handle to SafenetworkJS by calling setSafeAppHandle().
+   *
+   * @param {SAFEApp} appHandle  from SAFE API see this.safeApi.initialiseApp()
+   */
 
   setSafeAppHandle (appHandle) {
     this.initialise()             // Clears active services (so DOM API handles will be discarded)
@@ -712,6 +831,8 @@ class SafenetworkApi {
     }
   }
 
+  // TODO add documentation for more functions...
+
   // For access to SAFE API:
   appHandle () { return this._appHandle }
   getAuthUri () { return this._safeAuthUri } // TODO ensure auth URI comes from bootstrap
@@ -722,17 +843,17 @@ class SafenetworkApi {
   /**
    * authorise with SAFE Network - for desktop apps (non-browser)
    *
-   * @param  {object}  appConfig     See SAFE API docs
+   * @param  {object}  appInfo     See SAFE API docs
    * @param  {object}  appContainers See SAFE API docs
    * @param  {object}  containerOpts See SAFE API docs
    * @param  {object}  argv          TODO ???
    * @return {Promise}
    */
-  async authoriseWithSafeBrowser (appConfig, appContainers, containerOpts, argv) {
+  async authoriseWithSafeBrowser (appInfo, appContainers, containerOpts, argv) {
     // bootstrap is for auth from nodeJs and CLI
-    this.safeApi.bootstrap(appConfig, appContainers, containerOpts, argv).then((safeApp) => {
+    this.safeApi.bootstrap(appInfo, appContainers, containerOpts, argv).then((safeApp) => {
       this.setSafeAppHandle(safeApp)
-      this._safeAppConfig = appConfig
+      this._safeAppInfo = appInfo
       this._safeAppContainers = appContainers
       this._safeContainerOpts = containerOpts
       this._safeAuthUri = ''  // TODO refactor to get this from safeApi.bootstrap()
@@ -750,15 +871,15 @@ class SafenetworkApi {
   // - if authorising using another method, you MUST call SafenetworkApi.setApi()
   //   with a valid SAFEAppHandle
   //
-  // @param [optional] appConfig - information for auth UI, if ommitted generic
+  // @param [optional] appInfo - information for auth UI, if ommitted generic
   //                - see DOM API this.safeApi.initialise()
   //
   // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
   //
 
-  // TODO review/update initReadOnly() - commented out for now.
-  async initReadOnly (appConfig = untrustedAppConfig) {
-    logApi('%s.initReadOnly(%O)...', this.constructor.name, appConfig)
+  // TODO review/update initReadOnly()
+  async initReadOnly (appInfo = untrustedAppInfo) {
+    logApi('%s.initReadOnly(%O)...', this.constructor.name, appInfo)
 
     // TODO remove when 'connection problems' solved (see dev forum )
     if (extraDebug) {
@@ -774,7 +895,7 @@ class SafenetworkApi {
 
     let tmpAppHandle
     try {
-      tmpAppHandle = await this.safeApi.initialiseApp(appConfig, (newState) => {
+      tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
         // Callback for network state changes
         logApi('SafeNetwork state changed to: ', newState)
         this._isConnected = newState // TODO bugchase
@@ -782,7 +903,7 @@ class SafenetworkApi {
 
       logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
       this.setSafeAppHandle(tmpAppHandle)
-      this._safeAppConfig = appConfig
+      this._safeAppInfo = appInfo
       this._safeAppPermissions = undefined
       if (window) {
         let connUri = await this.auth.genConnUri()
@@ -805,26 +926,20 @@ class SafenetworkApi {
     }
   }
 
-  // one-step authorisation with SAFE network - for web apps (in SAFE Browser)
-  //
-  // Before you can use the SafenetworkApi methods, you must authorise your application
-  // with SAFE network. This function provides simplified, one step authorisation, but
-  // you can authorise separately, including using the SAFE DOM API directly to
-  // obtain a valid SAFEAppHandle, which you MUST then use to initialise
-  // the SafenetworkApi.
-  //
-  // - if using this method you don't need to do anything with the returned SAFEAppHandle
-  // - if authorising using another method, you MUST call SafenetworkApi.setApi() with a valid SAFEAppHandle
-  //
-  // @param appConfig      - information for auth UI - see DOM API this.safeApi.initialise()
-  // @param appContainers - (optional) requested permissions - see DOM API this.safeApi.authorise()
-  //
-  // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
-  //
-
-  // TODO review/update/delete simpleAuthorise() - commented out for now.
-  async simpleAuthorise (appConfig, appContainers) {
-    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appConfig, appContainers)
+  /**
+   * one-step authorisation with SAFE network - for web apps (in SAFE Browser)
+   *
+   * This function provides simplified, one step authorisation. As an
+   * alternative you can authorise separately using the SAFE API to
+   * obtain a valid SAFEApp handle. If so you MUST then pass this
+   * to SafenetworkApi by calling setSafeAppHandle()
+   *
+   * @param  {Object}  appInfo       information about your app (see SAFE API)
+   * @param  {Object}  appContainers [optional] permissions to request on containers
+   * @return {Promise}
+   */
+  async simpleAuthorise (appInfo, appContainers) {
+    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appInfo, appContainers)
 
     // TODO ??? not sure what I'm thinking here...
     // TODO probably best to have initialise called once at start so can
@@ -839,7 +954,7 @@ class SafenetworkApi {
 
     let tmpAppHandle
     try {
-      tmpAppHandle = await this.safeApi.initialiseApp(appConfig, (newState) => {
+      tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
         // Callback for network state changes
         logApi('SafeNetwork state changed to: ', newState)
         this._isConnected = newState // TODO bugchase
@@ -848,11 +963,11 @@ class SafenetworkApi {
       logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
       this.setSafeAppHandle(tmpAppHandle)
       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-      this._safeAppConfig = appConfig
+      this._safeAppInfo = appInfo
       this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
 
       // await this.testsNoAuth();  // TODO remove (for test only)
-      let authReqUri = await this.auth.genAuthUri(this._safeAppPermissions, this._safeAppConfig.options)
+      let authReqUri = await this.auth.genAuthUri(this._safeAppPermissions, this._safeAppInfo.options)
       this._safeAuthUri = await this.safeApi.authorise(authReqUri)
       logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 
@@ -995,6 +1110,7 @@ class SafenetworkApi {
 
   /**
    * Get an initialised default container instance
+   *
    * @param {Object}  containerRef { safePath: | safeUri: }
    *                                  safePath: mounted path (either '/' or one of '_publicNames', '_public' etc)
    *                                  safeUri: full or partial safe uri, [safe://][serviceName.]publicName
@@ -1029,7 +1145,8 @@ class SafenetworkApi {
   }
 
   /**
-   * Get an initialised ServicesContainer instance for the publicName
+   * Get an initialised services container instance for a SAFE URI
+   *
    * @param  {String}  safeUri  full or partial safe uri, [safe://][serviceName.]publicName
    *                             Examples for safeUri:
    *                                    safe://blog.happybeing
@@ -1037,7 +1154,7 @@ class SafenetworkApi {
    *                                    email.happybeing
    *                                    happybeing
    *
-   * @return {Promise} an initialised container object
+   * @return {Promise} an initialised object (subclass of SafeContainer)
    */
   async getSafeContainerFromUri (safeUri) {
     debug('%s.getSafeContainerFromUri(%s)', this.constructor.name, safeUri)
@@ -1061,6 +1178,7 @@ class SafenetworkApi {
 
   /**
    * Get an initialised ServicesContainer instance for the publicName
+   *
    * @param  {String} publicName
    * @param  {boolean}  createNew access (false) or create (true) services MutableData
    * @return {Object}            initialised instance of ServicesContainer
@@ -1080,6 +1198,7 @@ class SafenetworkApi {
 
   /**
    * Get an initialised NfsContainer instance
+   *
    * @param {String} nameOrKey  Either the path (starting with a public container) or the XOR address
    * @param  {Boolean}  createNew (optional) true if you want to create a new NFS MutableData
    * @param  {Boolean}  isPublic (optional) if createNew, specify true to make it shareable (eg in _public)
@@ -1138,21 +1257,27 @@ class SafenetworkApi {
     }
   }
 
-  // Set (ie insert or update) an entry in a mutable data object
-  //
-  // User must be logged in
-  // App must have 'Insert'/'Update' permissions as appropriate
-  //
-  // Encryption is handled automatically by the DOM APIs
-  // - if the MD is public, they do nothing
-  // - if the MD is private, they encrypt/decrypt using the MD private key
-  //
-  // @param mData
-  // @param key
-  // @param value
-  // @param mustNotExist  [defaults to false] if true, will fail if the key exists in the MD object
-  //
-  // @returns a Promise which resolves true if successful
+  /**
+   * Set (ie insert or update) an entry in a mutable data object
+   *
+   * User must be logged in
+   * App must have 'Insert'/'Update' permissions as appropriate
+   *
+   * Encryption is handled automatically by the DOM APIs
+   *   - if the MD is public, they do nothing
+   *   - if the MD is private, they encrypt/decrypt using the MD private key
+
+  @param mustNotExist
+  @param value
+
+  @returns a Promise which resolves true if successful
+   * [setMutableDataValue description]
+   * @param  {MutableData}  mData   See SAFE API
+   * @param  {String}  key
+   * @param  {Object}  value
+   * @param  {[type]}  mustNotExist [defaults to false] if true, will fail if the key exists in the MD object
+   * @return {Promise}
+   */
   async setMutableDataValue (mData, key, value, mustNotExist) {
     if (mustNotExist === undefined) {
       mustNotExist = true
@@ -1197,18 +1322,20 @@ class SafenetworkApi {
   * ----------------
   */
 
-  // Get the key/value of a public name's entry in the _publicNames container
-  //
-  // User must:
-  //  - be logged into the account owning the public name for this to succeed.
-  //  - authorise the app to 'Read' _publicNames on this account.
-  //
-  // @param publicName
-  //
-  // @returns a Promise which resolves to an object containing the key and ValueVersion
-  // The returned object is null on failure, or contains:
-  //  - a 'key' of the format: '_publicNames/<public-name>'
-  //  - a 'ValueVersion', the value part will be the XOR name of the services entry MD for the public name
+  /**
+   * Get the key/value of a public name's entry in the _publicNames container
+   *
+   * User must:
+   * - be logged into the account owning the public name for this to succeed.
+   * - authorise the app to 'Read' _publicNames on this account.
+   *
+   * @param  {String}  publicName
+   *
+   * @returns a Promise which resolves to an object containing the key and ValueVersion
+   *    The returned object is null on failure, or contains:
+   *    - a 'key' of the format: '_publicNames/<public-name>'
+   *    - a 'ValueVersion', the value part will be the XOR name of the services entry MD for the public name
+   */
   async getPublicNameEntry (publicName) {
     logApi('getPublicNameEntry(%s)...', publicName)
     try {
@@ -1410,7 +1537,7 @@ class SafenetworkApi {
   /**
    * Check if the string is suitable for use as a public name
    *
-   * @param  {[type]}  name
+   * @param  {String}  name
    * @return {Boolean}      true if the length and characters suitable
    */
   isValidPublicName (name) {
@@ -1426,7 +1553,7 @@ class SafenetworkApi {
 
   // Internal version returns a handle which must be freed by the caller
   //
-  // @param publicName
+  // @param {String} publicName
   //
   // @returns a Promise which resolves to an object containing the new entry's key, value and handle:
   //  - key:        of the format: '_publicNames/<public-name>'
@@ -1893,7 +2020,7 @@ class SafenetworkApi {
       try {
         if (err.status === '401' && this._authOnAccessDenied && allowAuthOn401) {
           allowAuthOn401 = false // Once per fetch attempt
-          await this.simpleAuthorise(this._safeAppConfig, this._safeAppPermissions)
+          await this.simpleAuthorise(this._safeAppInfo, this._safeAppPermissions)
           return this._fetch(docUri, options)
         }
       } catch (err) {
@@ -3218,22 +3345,6 @@ class SafeServiceLDP extends ServiceInterface {
 // let safeWeb = new SafenetworkApi()
 
 module.exports.SafenetworkApi = SafenetworkApi
-
-// module.exports.SAFE_ERRORS = SafeApiErrors
-
-// TODO ??? change to export class, something like this (example rdflib Fetcher.js)
-// class SafenetworkApi {...}
-// let safeWeb = new SafenetworkApi()
-// module.exports = SafenetworkApi
-// module.exports.safeWeb = safeWeb
-
-/* TODO remove this and all refs to safeWeb (for current usage see README.md)
-module.exports.safeWeb = safeWeb
-module.exports.setSafeAppHandle = SafenetworkApi.prototype.setSafeAppHandle.bind(safeWeb)
-module.exports.listContainer = SafenetworkApi.prototype.listContainer.bind(safeWeb)
-module.exports.testsNoAuth = SafenetworkApi.prototype.testsNoAuth.bind(safeWeb)
-module.exports.testsAfterAuth = SafenetworkApi.prototype.testsAfterAuth.bind(safeWeb)
-*/
 
 /*
  *  Override window.fetch() in order to support safe:// URIs
