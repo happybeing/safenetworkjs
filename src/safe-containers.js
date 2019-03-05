@@ -16,7 +16,7 @@ const debugEntry = require('debug')('safenetworkjs:container-entries')
 const debugCache = require('debug')('safenetworkjs:cache')
 
 const u = require('./safenetwork-utils')
-const NfsContainerFiles = require('./nfs-files').NfsContainerFiles
+const _NfsContainerFiles = require('./nfs-files')._NfsContainerFiles
 const CONSTANTS = require('./constants')
 
 const defaultContainerNames = [
@@ -1142,7 +1142,7 @@ class SafeContainer {
    * Note: if this function fails, the cached file state is purged and any file
    *       descriptor will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
    * @return {Promise}          String container bytes read
@@ -1168,7 +1168,7 @@ class SafeContainer {
    * Note: if this function fails, the cached file state is purged and any file
    *       descriptor will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
@@ -1218,7 +1218,7 @@ class SafeContainer {
 
   /** File system operation results cache
 
-    These functions are called by the container's NfsContainerFiles object
+    These functions are called by the container's _NfsContainerFiles object
     rather than by the container itself, because that implements the file
     operations.
   */
@@ -1851,7 +1851,7 @@ class NfsContainer extends SafeContainer {
   async initialiseNfs () {
     if (!this._nfs) {
       this._nfs = await this._mData.emulateAs('NFS')
-      this._files = new NfsContainerFiles(this, this._safeJs, this._mData, this._nfs)
+      this._files = new _NfsContainerFiles(this, this._safeJs, this._mData, this._nfs)
     }
     return this._nfs
   }
@@ -2232,7 +2232,7 @@ class NfsContainer extends SafeContainer {
    * Note: if this function fails, the file state is flushed and any file descriptor
    *       will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
    * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
@@ -2258,7 +2258,7 @@ class NfsContainer extends SafeContainer {
    * Note: if this function fails, the file state is flushed and any file descriptor
    *       will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Uint8Array}  buf  buffer to fill with data
    * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
@@ -2285,7 +2285,7 @@ class NfsContainer extends SafeContainer {
    * Note: if this function fails, the cached file state is purged and any file
    *       descriptor will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
    * @return {Promise}          String container bytes read
@@ -2310,7 +2310,7 @@ class NfsContainer extends SafeContainer {
    * Note: if this function fails, the cached file state is purged and any file
    *       descriptor will be invalidated
    *
-   * @param  {String}  itemPath path (key) of the file (in container which owns this NfsContainerFiles)
+   * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
