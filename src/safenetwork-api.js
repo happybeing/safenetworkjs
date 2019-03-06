@@ -391,6 +391,8 @@ Features generic JSON i/f for:
 
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
 
+const SUCCESS = null
+
 // Local
 const containers = require('./safe-containers')
 const NfsContainer = containers.NfsContainer
@@ -619,6 +621,12 @@ class SafenetworkApi {
   }
 
   isLowBalanceActive () { return this._lowBalanceWarning === true }
+
+  unknownErrorIn (functionName) {
+    let unknownError = new Error('Unknown error in ' + functionName)
+    unknownError.code = CONSTANTS.ERROR_CODE.UNKNOWN_ERROR
+    return unknownError
+  }
 
   /**
    * Enable the SAFE Services API
@@ -1022,10 +1030,12 @@ class SafenetworkApi {
   * @param  {String}  operation 'insert', 'update' or 'delete'
   * @param  {String}  key
   * @param  {String}  value
-  * @return {Promise}           true on success
+  * @return {Promise} Object { result: null on success, or an Error object }
+  *
+  * Note: throws an error for ERROR_CODE.ACCESS_DENIED but all other errors
+  *       are passed by in the returned object
   */
   async nfsRawMutate (nfs, operation, fileName, file, version, newMetadata) {
-    let result
     try {
       if (operation === 'update') {
         await nfs.update(fileName, file, version, newMetadata)
@@ -1034,18 +1044,20 @@ class SafenetworkApi {
       } else if (operation === 'delete') {
         await nfs.delete(fileName, version)
       } else {
-        throw new Error('unknown NFS operation: ' + operation)
+        let msg = 'nfsRawMutate() - unknown NFS operation: ' + operation
+        error(msg)
+        return this.unknownError(msg)
       }
-      result = true
+      return SUCCESS
     } catch (e) {
       debug(e)
       if (e.code === CONSTANTS.ERROR_CODE.LOW_BALANCE) {
         this.enableLowBalanceWarning()
       } else if (e.code === CONSTANTS.ERROR_CODE.ACCESS_DENIED) {
-        throw e // Throw so that nfsMutate() can request permission
+        throw e // Throw so that nfsMutate() can catch to request permission
       }
+      return e
     }
-    return result
   }
 
  /**
@@ -1057,7 +1069,7 @@ class SafenetworkApi {
   * @param  {File}    file        NFS File (use undefined for 'delete')
   * @param  {File}    version     new version of entry (use undefined for 'insert')
   * @param  {String}  newMetadata metadata to be set (use undefined for 'delete')
-  * @return {Promise}             true on success
+   * @return {Promise} Object { result: null on success, or an Error object }
   */
   async nfsMutate (nfs, permissions, operation, fileName, file, version, newMetadata) {
     let perms = permissions !== undefined ? permissions : defaultContainerPerms['NfsContainer']
@@ -1076,15 +1088,16 @@ class SafenetworkApi {
           const uri = await this.auth.genShareMDataUri(mdPermissions)
           await this.safeApi.fromUri(this.safeApp, uri)
           result = await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
-        } catch (e) {
-          throw e
-        }
+        } catch (e) { error(e); return e }
       } else {
         debug('%s.nfsArpMutate() - %s() failed on NFS object', this.constructor.name, operation)
-        debug(e)
+        error(e)
+        return e
       }
     }
-    return result
+    if (result === SUCCESS) return SUCCESS
+
+    return new Error('Unknown error creating NFS file')
   }
 
   /* --------------------------

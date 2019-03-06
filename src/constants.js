@@ -8,6 +8,9 @@
  */
 
 const CONSTANTS = {
+  // SafenetworkJs:
+  SUCCESS: null,
+
   /*
    * What constitutes a valid public name is not specified in the containers
    *  RFC, but the Web Hosting Manager example code specifies:
@@ -45,7 +48,11 @@ const CONSTANTS = {
     LOW_BALANCE: -113,
     NFS_FILE_NOT_FOUND: -301,
     INVALID_SIGN_KEY_HANDLE: -1011,
-    EMPTY_DIR: -1029
+    EMPTY_DIR: -1029,
+
+    // SafenetworkJS errors:
+    UNKNOWN_ERROR: -2000,
+    INVALID_FILE_DESCRIPTOR: -2001
   },
   APP_ERR_CODE: {
     INVALID_PUBLIC_NAME: -10001,

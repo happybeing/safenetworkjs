@@ -17,7 +17,7 @@ const debugCache = require('debug')('safenetworkjs:cache')
 
 const u = require('./safenetwork-utils')
 const _NfsContainerFiles = require('./nfs-files')._NfsContainerFiles
-const CONSTANTS = require('./constants')
+const C = require('./constants')
 
 const defaultContainerNames = [
   '_documents',
@@ -365,7 +365,7 @@ class SafeContainer {
   isValidKey (key) { return true }          // Containers should sanity check keys in case of corruption
                                             // but still cope with a valid key that has an invalid value
   isHiddenEntry (key) {
-    return key === CONSTANTS.MD_METADATA_KEY || // Containers for which this is not hidden should override
+    return key === C.MD_METADATA_KEY || // Containers for which this is not hidden should override
            !this.isValidKey(key)
   }
 
@@ -630,16 +630,22 @@ class SafeContainer {
   /**
    * Get listing of folder
    * @param  {String}  folderPath
-   * @return {Promise}    list of file and folder names in the folder
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            listing: list of file and folder names (folders end with '/') }
    */
   async listFolder (folderPath) {
     debug('%s.listFolder(\'%s\')', this.constructor.name, folderPath)
 
     try {
-      let resultsRef = await this.listFolderResultsRef(folderPath)
-      if (resultsRef) return resultsRef.result
+      let result = await this.listFolderResultsRef(folderPath)
+      if (result.status === C.SUCCESS) {
+        return { status: C.SUCCESS, listing: result.resultsRef.result }
+      }
+      return result
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -705,7 +711,11 @@ class SafeContainer {
               let subFolder = folderMatch.substring(plainKey.length)
               if (subFolder[0] === '/') subFolder = subFolder.substring(1)
               // As it's the child, call listFolderResultsRef() to use its cache
-              resultsRef = await matchedChild.listFolderResultsRef(subFolder)
+              let folderResult = await matchedChild.listFolderResultsRef(subFolder)
+              if (folderResult.status !== C.SUCCESS) {
+                throw folderResult.status
+              }
+              resultsRef = folderResult.resultsRef
               debugEntry('%s.listing-3: %o', constructor.name, resultsRef.resultsMap[resultsRef.resultsKey]['listFolder'])
             }
             resolve() // Resolve the entry's promise
@@ -723,7 +733,7 @@ class SafeContainer {
       debugEntry('%s.listing-6-END: %o', constructor.name, listing)
       resultsRef = this._cacheResultForPath(folderPath, 'listFolder', listing)
     }
-    return resultsRef
+    return { status: C.SUCCESS, 'resultsRef': resultsRef }
   }
 
   /**
@@ -758,7 +768,6 @@ class SafeContainer {
       // We add this._subTree to the front of the path
       itemMatch = this._subTree + itemMatch
 
-// ???      return new Promise(async (resolve, reject) => {
       // TODO remove debug calls (and comment out the value parts until moved elsewhere)
       let entries = await this._mData.getEntries()
       // TODO revert to safe-node-app v0.9.1 code:
@@ -807,7 +816,7 @@ class SafeContainer {
                   let matchedChild = await this._getContainerForKey(plainKey)
                   debug('calling matchedChild %s.%s(%s,...)', matchedChild.constructor.name, functionName, itemMatch.substring(plainKey.length + 1))
                   result = await matchedChild[functionName](itemMatch.substring(plainKey.length + 1), p2, p3, p4, p5)
-                  debugEntry('loop result-2: %o', await result)
+                  debugEntry('loop result-2: %o', result)
                   resolve(result)
                 }
               }
@@ -821,7 +830,7 @@ class SafeContainer {
         debug('WARNING: %s._callFunctionOnItem(%s, %s) - item not found to call', this.constructor.name, itemPath, functionName)
         result = containerTypeCodes.notFound
       }
-      debug('%s.call returning result: %o', constructor.name, result.result)
+      debug('%s.call returning result: %o', constructor.name, result)
       return result
     } catch (e) {
       debug('ERROR: %s._callFunctionOnItem(%s, %s) failed', this.constructor.name, itemPath, functionName)
@@ -940,19 +949,28 @@ class SafeContainer {
    * Get attributes of a file or directory
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor (if file is open)
-   * @return {Promise}          attributes object
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            attributes: an attibutes object }
    */
   async itemAttributes (itemPath, fd) {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
-      if (resultsRef) return resultsRef.result
+      let result = await this.itemAttributesResultsRef(itemPath, fd)
+      if (result.status === C.SUCCESS) {
+        return { status: C.SUCCESS, attributes: result.resultsRef.result }
+      }
+      return result
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
+  /* @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            resultsRef: Object }
+   */
   async itemAttributesResultsRef (itemPath, fd) {
     debug('%s.itemAttributesResultsRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
@@ -985,7 +1003,8 @@ class SafeContainer {
             type === containerTypeCodes.servicesContainer ||
             type === containerTypeCodes.childContainerItem) {
           debug('%s is type: %s', itemPath, type)
-          resultsRef = await this._callFunctionOnItem(itemPath, 'itemAttributesResultsRef')
+          let callResult = await this._callFunctionOnItem(itemPath, 'itemAttributesResultsRef')
+          if (callResult.status === C.SUCCESS) resultsRef = callResult.resultsRef
         }
       }
 
@@ -1009,13 +1028,13 @@ class SafeContainer {
       }
     } catch (e) {
       error(e)
-      throw e
+      return { status: e }
     }
     if (!resultsRef) {
       resultsRef = this._cacheResultForPath(itemPath, fileOperation, result)
     }
 
-    return resultsRef
+    return { status: C.SUCCESS, 'resultsRef': resultsRef }
   }
 
   async openFile (itemPath, nfsFlags) {
@@ -1023,7 +1042,10 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'openFile', nfsFlags)
-    } catch (e) { error(e) }
+    } catch (e) {
+      error(e)
+      return { status: e }
+    }
   }
 
   async createFile (itemPath) {
@@ -1031,7 +1053,10 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'createFile')
-    } catch (e) { error(e) }
+    } catch (e) {
+      error(e)
+      return { status: e }
+    }
   }
 
   async closeFile (itemPath, fd) {
@@ -1041,6 +1066,7 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'closeFile', fd)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -1058,8 +1084,8 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'deleteFile')
     } catch (e) {
       error(e)
+      return { status: e }
     }
-    return { result: false }
   }
 
   /**
@@ -1067,7 +1093,7 @@ class SafeContainer {
    *
    * @param  {String}  itemPath
    * @param  {String}  newItemPath
-   * @return {Promise} Object { result: true on success,
+   * @return {Promise} Object { status: true on success,
    *                            wasLastItem: true if itemPath folder left emtpy }
    */
   async renameFile (itemPath, newItemPath) {
@@ -1077,8 +1103,8 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'renameFile', newItemPath)
     } catch (e) {
       error(e)
+      return { status: e }
     }
-    return { result: false }
   }
 
   /**
@@ -1091,7 +1117,10 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'getFileMetadata', fd)
-    } catch (e) { error(e) }
+    } catch (e) {
+      error(e)
+      return { status: e }
+    }
   }
 
   /**
@@ -1106,7 +1135,10 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'setFileMetadata', fd, metadata)
-    } catch (e) { error(e) }
+    } catch (e) {
+      error(e)
+      return { status: e }
+    }
   }
 
   // Read up to len bytes starting from pos
@@ -1116,7 +1148,10 @@ class SafeContainer {
     try {
       // Default is a container of containers, not files so pass to child container
       return await this._callFunctionOnItem(itemPath, 'readFile', fd, pos, len)
-    } catch (e) { error(e) }
+    } catch (e) {
+      error(e)
+      return { status: e }
+    }
   }
 
   // Write up to len bytes into buf (Uint8Array), starting at pos
@@ -1128,6 +1163,7 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'readFileBuf', fd, buf, pos, len)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -1144,7 +1180,7 @@ class SafeContainer {
    *
    * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
-   * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
+   * @param  {Buffer|String}  content      (Number | C.NFS_FILE_END)
    * @return {Promise}          String container bytes read
    */
   async writeFile (itemPath, fd, content) {
@@ -1154,6 +1190,7 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'writeFile', fd, content)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -1183,6 +1220,7 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, 'writeFileBuf', fd, buf, len, pos)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -1213,6 +1251,7 @@ class SafeContainer {
       return await this._callFunctionOnItem(itemPath, '_truncateFile', fd, size)
     } catch (e) {
       error(e)
+      return e
     }
   }
 
@@ -1281,8 +1320,9 @@ class SafeContainer {
       let resultsHolder = this._resultHolderMap[folderPath]
       if (resultsHolder) listFolderResult = resultsHolder['listFolder']
       if (!listFolderResult) {
-        let resultsRef = await this.listFolderResultsRef(folderPath)
-        listFolderResult = resultsRef.result
+        let result = await this.listFolderResultsRef(folderPath)
+        if (result.status !== C.SUCCESS) throw result.status
+        listFolderResult = result.resultsRef.result
       }
 
       // Remove itemName from the result
@@ -1698,19 +1738,29 @@ class ServicesContainer extends SafeContainer {
    * Get attributes of a file or directory
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor (if file is open)
-   * @return {Promise}          attributes object
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            attributes: an attibutes object }
    */
   async itemAttributes (itemPath, fd) {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
-      if (resultsRef) return resultsRef.result
+      let result = await this.itemAttributesResultsRef(itemPath, fd)
+      if (result.status === C.SUCCESS) {
+        return { status: C.SUCCESS, attributes: result.resultsRef.result }
+      }
+      return result
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
+  /*
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            resultsRef: Object }
+   */
   async itemAttributesResultsRef (itemPath) {
     debug('%s.itemAttributesResultsRef(\'%s\')', this.constructor.name, itemPath)
     let fileOperation = 'itemAttributes'
@@ -1763,13 +1813,14 @@ class ServicesContainer extends SafeContainer {
       }
     } catch (e) {
       error(e)
+      return { status: e }
     }
 
     if (!resultsRef) {
       resultsRef = this._cacheResultForPath(itemPath, fileOperation, result)
     }
 
-    return resultsRef
+    return { status: C.SUCCESS, 'resultsRef': resultsRef }
   }
 }
 
@@ -1958,16 +2009,22 @@ class NfsContainer extends SafeContainer {
    * Get attributes of a file or directory
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor (if file is open)
-   * @return {Promise}          attributes object
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            attributes: an attibutes object }
    */
   async itemAttributes (itemPath, fd) {
     debug('%s.itemAttributes(\'%s\', %s)', this.constructor.name, itemPath, fd)
 
     try {
-      let resultsRef = await this.itemAttributesResultsRef(itemPath, fd)
-      if (resultsRef) return resultsRef.result
+      let result = await this.itemAttributesResultsRef(itemPath, fd)
+      if (result.status === C.SUCCESS) {
+        return { status: C.SUCCESS, attributes: result.resultsRef.result }
+      }
+      return result
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -1975,21 +2032,25 @@ class NfsContainer extends SafeContainer {
    * Get attributes of a file or directory as a resultsRef object
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor (if file is open)
-   * @return {Promise}          object containing result plus resultsMap, resultsKey for looking up a resultHolder
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            resultsRef: Object }
    */
   async itemAttributesResultsRef (itemPath, fd) {
     debug('%s.itemAttributesResultsRef(\'%s\', %s)', this.constructor.name, itemPath, fd)
     let fileOperation = 'itemAttributes'
+    let resultsRef  // Will be set if result is from child (and so cached by child)
 
     // Look for a cached resultsRef
     let resultHolder = this._resultHolderMap[itemPath]
     if (resultHolder && resultHolder[fileOperation]) {
-      return {
+      resultsRef = {
         resultsMap: this._resultHolderMap,
         resultsKey: itemPath,
         result: resultHolder[fileOperation],
         'fileOperation': fileOperation  // For debugging only
       }
+      return { status: C.SUCCESS, 'resultsRef': resultsRef }
     }
 
     let result
@@ -2072,21 +2133,44 @@ class NfsContainer extends SafeContainer {
       }
     } catch (e) {
       error(e)
+      return { status: e }
     }
 
     debug('%s is type: %s', itemPath, result.entryType)
-    return this._cacheResultForPath(itemPath, fileOperation, result)
+    if (!resultsRef) {
+      resultsRef = this._cacheResultForPath(itemPath, fileOperation, result)
+    }
+
+    return { status: C.SUCCESS, 'resultsRef': resultsRef }
   }
 
+  /**
+   * Open a file for read or write
+   *
+   * @param  {String}  itemPath
+   * @param  {Number}  nfsFlags SAFE NFS API open() flags
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            fileDescriptor: an integar >0 on success }
+   */
   async openFile (itemPath, nfsFlags) {
     debug('%s.openFile(\'%s\', %s)', this.constructor.name, itemPath, nfsFlags)
     try {
       return await this._files.openFile(itemPath, nfsFlags)
     } catch (e) {
       error(e)
+      return e
     }
   }
 
+  /**
+   * Create a file.
+   *
+   * @param  {String}  itemPath
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            fileDescriptor: an integar >0 on success }
+   */
   async createFile (itemPath) {
     debug('%s.createFile(\'%s\')', this.constructor.name, itemPath)
     let result
@@ -2097,14 +2181,15 @@ class NfsContainer extends SafeContainer {
       // so that itemAttributes() can be used to check the createFile()
       // succeeded. This is done by inserting an itemAttributes() result
       // into the cache of this container *and* its parent container
-      if (result) {
+      if (result.status === C.SUCCESS) {
         let attributes = this._newFileAttributes()
         this._cacheResultForPath(itemPath, 'itemAttributes', attributes)
       }
+      return result
     } catch (e) {
       error(e)
+      return e
     }
-    return result
   }
 
   // Helper to cache an itemAttributes() entry for a new file, pending closeFile()
@@ -2121,20 +2206,28 @@ class NfsContainer extends SafeContainer {
     }
   }
 
+  /**
+   * Close file and save to network
+   * @param  {String}  itemPath
+   * @param  {Number}  fd
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object }
+   */
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
       return this._files.closeFile(itemPath, fd)
     } catch (e) {
       error(e)
+      return e
     }
   }
 
   /**
-   * delete a file
+   * Delete file
+   * @param  {String}  itemPath
    *
-   * @param  {String}  itemPath]
-   * @return {Promise} Object { result: true on success,
+   * @return {Promise} Object { status: C.SUCCESS or an Error object,
    *                            wasLastItem: true if itemPath folder left emtpy }
    */
   async deleteFile (itemPath) {
@@ -2143,8 +2236,8 @@ class NfsContainer extends SafeContainer {
       return this._files.deleteFile(itemPath)
     } catch (e) {
       error(e)
+      return { status: e }
     }
-    return { result: false }
   }
 
   /**
@@ -2153,6 +2246,18 @@ class NfsContainer extends SafeContainer {
    * @param  {String}  itemPath
    * @param  {String}  newItemPath
    * @return {Promise} Object { result: true on success,
+   *                            wasLastItem: true if itemPath folder left emtpy }
+   */
+
+  /**
+   * Rename/move a file (within the same container)
+   *
+   * Note: SafenetworkApi.renameFile() supports rename/move between containers
+   *
+   * @param  {String}  sourcePath
+   * @param  {String}  destinationPath
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
    *                            wasLastItem: true if itemPath folder left emtpy }
    */
 
@@ -2180,31 +2285,34 @@ class NfsContainer extends SafeContainer {
       let trimmedNewPath = newItemPath
       if (this._parentEntryKey) trimmedNewPath = (this._parent._subTree + newItemPath).substring(this._parentEntryKey.length + 1)
 
-      if (itemPath === trimmedNewPath) return // Rename to self so do nothing
+      if (itemPath === trimmedNewPath) { // Rename to self does nothing
+        return { status: C.SUCCESS, wasLastItem: false }
+      }
 
-      result = await this._files.moveFile(itemPath, trimmedNewPath)
-      return true
+      return await this._files.renameFile(itemPath, trimmedNewPath)
     } catch (e) {
       error(e)
-      return false
+      return { status: e }
     }
-    return result
   }
 
   /**
    * Get user metadata for a file (file does not need to be open)
-   * @param  {String} itemPath
+   *
    * @param  {Number} fd       [optional] file descriptor obtained from openFile() or createFile()
-   * @return {Promise}         A buffer containing any metadata as previously set
+   *
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object
+   *                            metadata: a buffer containing any metadata as previously set }
    */
   async getFileMetadata (itemPath, fd) {
     try {
       return this._files.getFileMetadata(itemPath, fd)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
-
   /**
    * Set metadata to be written when on closeFile() (for a file opened for write)
    *
@@ -2212,31 +2320,36 @@ class NfsContainer extends SafeContainer {
    * @param  {String}  itemPath
    * @param  {Number}  fd       [optional] file descriptor
    * @param  {Buffer}  metadata Metadata that will be written on closeFile()
-   */
+   *
+   * @return {Promise} C.SUCCESS or an Error object
+  */
   async setFileMetadata (itemPath, fd, metadata) {
     try {
       return this._files.setFileMetadata(itemPath, fd, metadata)
     } catch (e) {
       error(e)
+      return e
     }
   }
 
   /**
    * Read up to len bytes starting from pos
    *
-   * readFile() can be used in one of two ways:
+   * This function can be used in one of two ways:
    * - simple: just call readFile() and it will read data, and if the
    *   file is not open yet, it will do that first
    * - you can call openFile() before, to open in a specific mode using flags
    *
-   * Note: if this function fails, the file state is flushed and any file descriptor
-   *       will be invalidated
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
    *
    * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
-   * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
-   * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          String container bytes read
+   * @param  {Number}  pos      (Number | C.NFS_FILE_START)
+   * @param  {Number}  len      (Number | C.NFS_FILE_END)
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object,
+   *                            content: String containing the bytes read }
    */
   async readFile (itemPath, fd, pos, len) {
     debug('%s.readFile(\'%s\', %s, %s, %s)', this.constructor.name, itemPath, fd, pos, len)
@@ -2244,26 +2357,28 @@ class NfsContainer extends SafeContainer {
       return this._files.readFile(itemPath, fd, pos, len)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
   /**
    * Read up to len bytes into buf (Uint8Array), starting at pos
    *
-   * readFileBuf() can be used in one of two ways:
-   * - simple: just call readFile() and it will read data, and if the
+   * This function can be used in one of two ways:
+   * - simple: just call readFileBuf() and it will read data, and if the
    *   file is not open yet, it will do that first
    * - you can call openFile() before, to open in a specific mode using flags
    *
-   * Note: if this function fails, the file state is flushed and any file descriptor
-   *       will be invalidated
+   * Note: if this function fails, the cached file state is purged and any file
+   *       descriptor will be invalidated
    *
    * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
-   * @param  {Uint8Array}  buf  buffer to fill with data
+   * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  pos      (Number | CONSTANTS.NFS_FILE_START)
    * @param  {Number}  len      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          Number of bytes read into buf
+   * @return {Promise} Object { status: C.SUCCESS or an Error object,
+   *                            bytes: Integer number of bytes read }
    */
   async readFileBuf (itemPath, fd, buf, pos, len) {
     debug('%s.readFileBuf(\'%s\', buf, %s, %s)', this.constructor.name, itemPath, pos, len)
@@ -2271,6 +2386,7 @@ class NfsContainer extends SafeContainer {
       return this._files.readFileBuf(itemPath, fd, buf, pos, len)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -2288,7 +2404,9 @@ class NfsContainer extends SafeContainer {
    * @param  {String}  itemPath path (key) of the file (in container which owns this _NfsContainerFiles)
    * @param  {Number}  fd       [optional] file descriptor obtained from openFile()
    * @param  {Buffer|String}  content      (Number | CONSTANTS.NFS_FILE_END)
-   * @return {Promise}          String container bytes read
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object,
+   *                            bytes: Integer number of bytes written }
    */
   async writeFile (itemPath, fd, content) {
     debug('%s.writeFile(\'%s\', %s, ...)', this.constructor.name, itemPath, fd)
@@ -2296,6 +2414,7 @@ class NfsContainer extends SafeContainer {
       return this._files.writeFile(itemPath, fd, content)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -2315,7 +2434,9 @@ class NfsContainer extends SafeContainer {
    * @param  {Uint8Array}  buf      [description]
    * @param  {Number}  len
    * @param  {Number}  pos  [optional] position of file to write (must not be less than end of last write)
-   * @return {Promise}          Number of bytes written to file
+   *
+   * @return {Promise} Object { status: C.SUCCESS or an Error object,
+   *                            bytes: Integer number of bytes written }
    */
   async writeFileBuf (itemPath, fd, buf, len, pos) {
     debug('%s.writeFileBuf(\'%s\', %s, buf, %s, %s)', this.constructor.name, itemPath, fd, len, pos)
@@ -2324,6 +2445,7 @@ class NfsContainer extends SafeContainer {
       return this._files.writeFileBuf(itemPath, fd, buf, len, pos)
     } catch (e) {
       error(e)
+      return { status: e }
     }
   }
 
@@ -2336,15 +2458,16 @@ class NfsContainer extends SafeContainer {
    * append. But since SAFE NFS lacks file truncate, we can only truncate
    * to zero which we do be creating a new file with NFS open().
    *
-   * When opening a SAFE NFS file for write we must 'append', otherwise FUSE
+    * When opening a SAFE NFS file for write we must 'append', otherwise FUSE
    * would have now way to append (since it can only open() for write, not
    * write with append). In turn, the ony way to allow FUSE to be able to open
    * and overwrite an existing NFS file is to implement truncate at size zero.
    *
    * @param  {String}  itemPath
-   * @param  {Number}  fd
+   * @param  {Number}  fd [optional] if omitted, truncates based on itemPath
    * @param  {Number}  size
-   * @return {Promise}
+   *
+   * @return {Promise} C.SUCCESS or an Error object
    */
   async _truncateFile (itemPath, fd, size) {
     debug('%s._truncateFile(\'%s\', %s, %s)', this.constructor.name, itemPath, fd, size)
@@ -2353,6 +2476,7 @@ class NfsContainer extends SafeContainer {
       return this._files._truncateFile(itemPath, fd, size)
     } catch (e) {
       error(e)
+      return e
     }
   }
 
