@@ -456,7 +456,7 @@ const S = safeUtils.string
 const path = safeUtils.path
 const url = safeUtils.url
 const getFullUri = safeUtils.getFullUri
-const pathBasename = safeUtils.pathBasename
+const itemPathBasename = safeUtils.itemPathBasename
 const hasSuffix = safeUtils.hasSuffix
 const filenameToBaseUri = safeUtils.filenameToBaseUri
 const getBaseUri = safeUtils.getBaseUri
@@ -1473,7 +1473,7 @@ class SafenetworkApi {
     logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', defaultContainer, publicName, containerName, mdTagType, isPrivate)
     try {
       let ownerPart = (publicName !== '' ? '/' + publicName : '') // Usually a folder is associated with a service on a public name
-      let key = defaultContainer + '/' + ownerPart + '/' + containerName
+      let key = defaultContainer + ownerPart + '/' + containerName
 
       let defaultMd
       if (defaultContainer !== '') {
@@ -1502,19 +1502,6 @@ class SafenetworkApi {
       await permissions.insertPermissionSet(pubKey, pmSet)
       await md.put(permissions, entriesHandle)
       let nameAndTag = await md.getNameAndTag()
-
-      // TODO BUG subfolder: try with 'posts/rand/', to chase bug in _getFolder() where we have a subfolder
-      /*
-      logLdp('DEBUG testing newly created service container, md: %s', md)
-      let randText = 'posts/' + Date.now()
-      logLdp('DEBUG try insert a random filename', randText)
-      let nfsHandle = await this.mutableData.emulateAs(md,'NFS')
-      logLdp('DEBUG 1 - create a file...')
-      let nfsFile = await this.storageNfs().create(randText)
-      logLdp('DEBUG 2 - insert file nfsFile: %s', nfsFile)
-      await this.storageNfs().insert(nfsFile, randText)
-      logLdp('...done.')
-      */
 
       if (defaultMd) {
         // Create an entry in defaultContainer (fails if key exists for this container)
@@ -1745,12 +1732,12 @@ class SafenetworkApi {
       let entries = await md.getEntries()
       let entriesList = await entries.listEntries()
       await entriesList.forEach((k, v) => {
-        logApi('Key: ', k.toString())
-        logApi('Value: ', v.buf.toString())
-        logApi('Version: ', v.version)
+        logApi('Key: ', entry.key.toString())
+        logApi('Value: ', entry.value.buf.toString())
+        logApi('Version: ', entry.value.version)
         if (k === nameKey) {
           logApi('Key: ' + nameKey + '- found')
-          return v.buf
+          return entry.value.buf
         }
       })
       logApi('Key: ' + nameKey + '- NOT found')
@@ -2598,16 +2585,6 @@ class SafeServiceLDP extends ServiceInterface {
     try {
       this._storageNfs = await (await this.storageMd()).emulateAs('NFS')
       logLdp('this.storageMd: %s', await this.storageMd())
-      /* TODO remove debug code:
-      logLdp('DEBUG this._storageNfs: %s', this._storageNfs)
-      let randText = 'rand/' + Date.now()
-      logLdp('DEBUG try insert a random filename', randText)
-      logLdp('DEBUG 1 - create a file...')
-      let nfsFile = await this.storageNfs().create(randText)
-      logLdp('DEBUG 2 - insert file nfsFile: %s', nfsFile)
-      await this.storageNfs().insert('filename',nfsFile)
-      logLdp('...done.')
-      */
       return this._storageNfs
     } catch (err) {
       logLdp('Unable to access NFS storage for %s service: %s', this.getName(), err)
@@ -2680,8 +2657,8 @@ class SafeServiceLDP extends ServiceInterface {
       headers.header('Accept-Post', '*/*')
     }
     // Add ACL and Meta Link in header
-    safeUtils.addLink(headers, safeUtils.pathBasename(docUri) + this.suffixAcl, 'acl')
-    safeUtils.addLink(headers, safeUtils.pathBasename(docUri) + this.suffixMeta, 'describedBy')
+    safeUtils.addLink(headers, safeUtils.itemPathBasename(docUri) + this.suffixAcl, 'acl')
+    safeUtils.addLink(headers, safeUtils.itemPathBasename(docUri) + this.suffixMeta, 'describedBy')
     // Add other Link headers
     safeUtils.addLinks(headers, fileMetadata)
   }
@@ -2772,7 +2749,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('                 param path: ' + docPath)
         logLdp('                 param version: ' + fileInfo.version)
         logLdp('                 param containerVersion: ' + fileInfo.containerVersion)
-        await this.storageNfs().delete(docPath, fileInfo.version + 1)
+        await (await this.storageNfs()).delete(docPath, fileInfo.version + 1)
         this._fileInfoCache.delete(docUri)
         return new Response(null, {status: 204, statusText: '204 No Content'})
       }
@@ -2835,10 +2812,10 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('WARNING: attempt to update a folder')
       } else {
         // Store content as new immutable data (pointed to by nfsFile)
-        let nfsFile = await this.storageNfs().create(body)
+        let nfsFile = await (await this.storageNfs()).create(body)
 
         // Add file to directory (by inserting nfsFile into container)
-        nfsFile = await this.storageNfs().update(docPath, nfsFile, fileInfo.containerVersion + 1)
+        nfsFile = await (await this.storageNfs()).update(docPath, nfsFile, fileInfo.containerVersion + 1)
         await this._updateFileInfo(nfsFile, docPath)
 
         // TODO implement LDP PUT response https://www.w3.org/TR/ldp-primer/
@@ -2863,12 +2840,12 @@ class SafeServiceLDP extends ServiceInterface {
       this.safeWeb().listContainer('_publicNames') // TODO remove this debug
 
       // logLdp('DEBUG:  this.storageNfs().create()...')
-      let nfsFile = await this.storageNfs().create(body)
+      let nfsFile = await (await this.storageNfs()).create(body)
       // mrhTODOx set file metadata (contentType) - how?
 
       // Add file to directory (by inserting nfsFile into container)
-      // logLdp('DEBUG:  this.storageNfs().insert(nfsHandle,nfsFile,%s)...',docPath)
-      nfsFile = await this.storageNfs().insert(nfsFile, docPath)
+      // logLdp('DEBUG:  this.storageNfs().insert(nfsFile,%s)...',docPath)
+      nfsFile = await (await this.storageNfs()).insert(docPath, nfsFile)
 
       // logLdp('DEBUG:  this._updateFileInfo(...)...')
       this._updateFileInfo(nfsFile, docPath)
@@ -2907,14 +2884,15 @@ class SafeServiceLDP extends ServiceInterface {
       // TODO If the options are being used to retrieve specific version
       // should we get the latest version from the API first?
       try {
-        logLdp('this.storageNfs().fetch(nfsHandle,%s)...', docPath)
-        nfsFile = await this.storageNfs().fetch(docPath)
-        logLdp('fetched nfsFile: %s', nfsFile.toString())
+        logLdp('this.storageNfs().fetch(%s)...', docPath)
+        nfsFile = await (await this.storageNfs()).fetch(docPath)
+        logLdp('fetched nfsFile: %o', nfsFile)
         fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
       } catch (err) {
         return new Response(null, {status: 404, statusText: '404 File not found'})
       }
-      logLdp('safeNfs.open() returns handle: %s', fileInfo.openHandle.toString())
+      fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeWeb().safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+      logLdp('safeNfs.open() returns handle: %o', fileInfo.openHandle)
 
       var etagWithoutQuotes = fileInfo.ETag
       // Request is for changed file, so if eTag matches return "304 Not Modified"
@@ -2929,7 +2907,7 @@ class SafeServiceLDP extends ServiceInterface {
 
       let body = null
       if (options.includeBody) {
-        let content = await window.safeNfsFile.read(fileInfo.openHandle, 0, fileInfo.size)
+        let content = await fileInfo.openHandle.read(0, fileInfo.size)
         logLdp('%s bytes read from file.', content.byteLength)
 
         let decoder = new TextDecoder()
@@ -2956,7 +2934,7 @@ class SafeServiceLDP extends ServiceInterface {
       return new Response(null, {status: 500, statusText: '500 Internal Server Error (' + err + ')'})
     } finally {
       if (fileInfo.openHandle) {
-        window.safeNfsFile.close(fileInfo.openHandle)
+        await fileInfo.openHandle.close()
       }
     }
   }
@@ -2967,8 +2945,7 @@ class SafeServiceLDP extends ServiceInterface {
   // Note: if the fileInfo object includes an openHandle this should be closed by the caller
   async _makeFileInfo (nfsFile, fileInfo, docPath) {
     try {
-//      fileInfo.openHandle = await nfsFile.open(4/* read TODO get from safeApp.CONSTANTS */)
-      fileInfo.size = nfsFile.size
+      fileInfo.size = await nfsFile.size()
       fileInfo.created = nfsFile.created
       fileInfo.modified = nfsFile.modified
       fileInfo.version = nfsFile.version
@@ -3031,82 +3008,89 @@ class SafeServiceLDP extends ServiceInterface {
       let entries = await (await this.storageMd()).getEntries()
       let entriesList = await entries.listEntries()
       debug('safe:TMP 2')
-      entriesList.forEach(async (k, v) => {
-        debug('safe:TMP 3')
-        // Skip deleted entries
-        if (v.buf.length === 0) {
-          // TODO try without this...
-          debug('safe:TMP 4')
-          return true  // Next
-        }
-        logLdp('Key: ', k.toString())
-        logLdp('Value: ', v.buf.toString('base64'))
-        logLdp('entryVersion: ', v.version)
+      entriesList.forEach(async (entry) => {
+        directoryEntries.push(new Promise(async (resolve, reject) => {
 
-        var dirPath = docPath
-        if (dirPath.slice(-1) !== '/') { dirPath += '/' } // Ensure a trailing slash
-
-        var key = k.toString()
-        // If the folder matches the start of the key, the key is within the folder
-        if (key.length > dirPath.length && key.substr(0, dirPath.length) === dirPath) {
-          debug('safe:TMP 5')
-          var remainder = key.slice(dirPath.length)
-          var itemName = remainder // File name will be up to but excluding first '/'
-          var firstSlash = remainder.indexOf('/')
-          if (firstSlash !== -1) {
-            itemName = remainder.slice(0, firstSlash + 1) // Directory name with trailing '/'
+          debug('safe:TMP 3')
+          // Skip deleted entries
+          if (entry.value.buf.length === 0) {
+            // TODO try without this...
+            debug('safe:TMP 4')
+            resolve()
+            return  // Next
           }
+          logLdp('Key: ', entry.key.toString())
+          logLdp('Value: ', entry.value.buf.toString('base64'))
+          logLdp('entryVersion: ', entry.value.version)
 
-          if (options.includeBody) {
-            debug('safe:TMP 6')
-            let testPath = docPath + this.suffixMeta
-            let fullItemUri = docUri + itemName
-            let metaFilePath
+          var dirPath = docPath
+          if (dirPath.slice(-1) !== '/') { dirPath += '/' } // Ensure a trailing slash
 
-            try {
-              debug('safe:TMP 7')
-              /*              if (await this.appHandle().mutableDataEntries.get(entriesHandle, testPath)) {
-              metaFilePath = testPath
+          var key = entry.key.toString()
+          // If the folder matches the start of the key, the key is within the folder
+          if (key.length > dirPath.length && key.substr(0, dirPath.length) === dirPath) {
+            debug('safe:TMP 5')
+            var remainder = key.slice(dirPath.length)
+            var itemName = remainder // File name will be up to but excluding first '/'
+            var firstSlash = remainder.indexOf('/')
+            if (firstSlash !== -1) {
+              itemName = remainder.slice(0, firstSlash + 1) // Directory name with trailing '/'
             }
-            */            } catch (err) {
-            debug('safe:TMP 8')
-          } // metaFilePath - file not found
-          logLdp('calling _addListingEntry for %s', itemName)
-          directoryEntries.push(this._addListingEntry(rdfGraph, fullItemUri, docUri, itemName, metaFilePath))
-          debug('safe:TMP 9')
+
+            if (options.includeBody) {
+              debug('safe:TMP 6')
+              let testPath = docPath + this.suffixMeta
+              let fullItemUri = docUri + itemName
+              let metaFilePath
+
+              try {
+                debug('safe:TMP 7')
+                /*              if (await this.appHandle().mutableDataEntries.get(entriesHandle, testPath)) {
+                metaFilePath = testPath
+              }
+              */            } catch (err) {
+              debug('safe:TMP 8')
+            } // metaFilePath - file not found
+            logLdp('calling _addListingEntry for %s', itemName)
+            directoryEntries.push(this._addListingEntry(rdfGraph, fullItemUri, docUri, itemName, metaFilePath))
+            debug('safe:TMP 9')
+          }
         }
+      }))
+    })
+    await Promise.all(directoryEntries).catch((err) => {
+      // TODO review error handling and responses
+      logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
+      // TODO are their any SAFE API codes we need to detect?
+      return new Response(null, {status: 404, statusText: '404 Resource Not Found'})
+    })
+
+    logLdp('Iteration finished')
+    //        let triples = await new $rdf.Serializer(rdfGraph).toN3(rdfGraph)
+
+    let triples
+    $rdf.serialize(null, rdfGraph, docUri, 'text/turtle',
+    function (err, result) {
+      if (!err) {
+        triples = result
+      } else {
+        throw err
       }
     })
 
-    await Promise.all(directoryEntries).then(async _ => {
-      logLdp('Iteration finished')
-      //        let triples = await new $rdf.Serializer(rdfGraph).toN3(rdfGraph)
+    let body = null
+    if (options.includeBody) {
+      body = triples
+    }
 
-      let triples
-      $rdf.serialize(null, rdfGraph, docUri, 'text/turtle',
-      function (err, result) {
-        if (!err) {
-          triples = result
-        } else {
-          throw err
-        }
-      })
+    response = new Response(body,{ status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'Content-Type': 'text/turtle',
+      'MS-Author-Via': 'SPARQL' }) })
+      logLdp('%s._getFolder(\'%s\', ...) response %s body:\n %s', this.constructor.name, docUri, response.status, triples)
 
-      let body = null
-      if (options.includeBody) {
-        body = triples
-      }
-
-      response = new Response(body,{ status: 200,
-        statusText: 'OK',
-        headers: new Headers({ 'Content-Type': 'text/turtle',
-        'MS-Author-Via': 'SPARQL' }) })
-        logLdp('%s._getFolder(\'%s\', ...) response %s body:\n %s', this.constructor.name, docUri, response.status, triples)
-
-        return response
-      }).catch((e) => debug(e.message))
-
-    } catch (err) { // TODO review error handling and responses
+    } catch(err) {
+      // TODO review error handling and responses
       logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
       // TODO are their any SAFE API codes we need to detect?
       return new Response(null, {status: 404, statusText: '404 Resource Not Found'})
@@ -3207,14 +3191,14 @@ class SafeServiceLDP extends ServiceInterface {
     let fileInfo = {}
     let metadataGraph
     try {
-      nfsFile = await this.storageNfs().fetch(metaFilePath)
+      nfsFile = await (await this.storageNfs()).fetch(metaFilePath)
     } catch (err) {}
 
     try {
       // Metadata file exists
       if (nfsFile) {
-        fileInfo.openHandle = await this.storageNfs().open(nfsFile, 4/* read TODO get from safeApp.CONSTANTS */)
-        let content = await window.safeNfsFile.read(fileInfo.openHandle, 0, fileInfo.size)
+        fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeWeb().safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+        let content = await fileInfo.openHandle.read(0, fileInfo.size)
 
         if (content) {
           logLdp('%s bytes read from file.', content.byteLength)
@@ -3242,7 +3226,7 @@ class SafeServiceLDP extends ServiceInterface {
       logLdp(err)
     } finally {
       if (fileInfo.openHandle) {
-        await window.safeNfsFile.close(fileInfo.openHandle)
+        await fileInfo.openHandle.close()
       }
     }
 
@@ -3338,7 +3322,7 @@ class SafeServiceLDP extends ServiceInterface {
       let nfsFile
       try {
         let nfsPath = docPath.slice(1)
-        nfsFile = await this.storageNfs().fetch(nfsPath)
+        nfsFile = await (await this.storageNfs()).fetch(nfsPath)
         logLdp('_getFileInfo() - fetched nfsFile: %s', nfsFile.toString())
         fileInfo = await this._makeFileInfo(nfsFile, {}, docPath)
         fileInfo.containerVersion = containerVersion
