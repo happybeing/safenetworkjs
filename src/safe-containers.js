@@ -1096,11 +1096,11 @@ class SafeContainer {
    * @return {Promise} Object { status: true on success,
    *                            wasLastItem: true if itemPath folder left emtpy }
    */
-  async renameFile (itemPath, newItemPath) {
-    debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
+  async moveFile (itemPath, newItemPath) {
+    debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
     try {
       // Default is a container of containers, not files so pass to child container
-      return await this._callFunctionOnItem(itemPath, 'renameFile', newItemPath)
+      return await this._callFunctionOnItem(itemPath, 'moveFile', newItemPath)
     } catch (e) {
       error(e)
       return { status: e }
@@ -2252,7 +2252,7 @@ class NfsContainer extends SafeContainer {
   /**
    * Rename/move a file (within the same container)
    *
-   * Note: SafenetworkApi.renameFile() supports rename/move between containers
+   * Note: SafenetworkApi.moveFile() supports rename/move between containers
    *
    * @param  {String}  sourcePath
    * @param  {String}  destinationPath
@@ -2271,8 +2271,8 @@ class NfsContainer extends SafeContainer {
   // here: https://forum.safedev.org/t/proposal-to-change-implementation-of-safe-nfs/2111?u=happybeing
   //
   // POSIX Ref: http://pubs.opengroup.org/onlinepubs/9699919799/
-  async renameFile (itemPath, newItemPath) {
-    debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
+  async moveFile (itemPath, newItemPath) {
+    debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, itemPath, newItemPath)
 
     let result
     try {
@@ -2289,7 +2289,7 @@ class NfsContainer extends SafeContainer {
         return { status: C.SUCCESS, wasLastItem: false }
       }
 
-      return await this._files.renameFile(itemPath, trimmedNewPath)
+      return await this._files.moveFile(itemPath, trimmedNewPath)
     } catch (e) {
       error(e)
       return { status: e }

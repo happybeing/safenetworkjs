@@ -487,9 +487,9 @@ class _NfsContainerFiles {
   }
 
   /**
-   * Rename/move a file (within the same container)
+   * Move/rename a file (within the same container)
    *
-   * Note: SafenetworkApi.renameFile() supports rename/move between containers
+   * Note: SafenetworkApi.moveFile() supports move/rename between containers
    *
    * @param  {String}  sourcePath
    * @param  {String}  destinationPath
@@ -497,15 +497,15 @@ class _NfsContainerFiles {
    * @return {Promise} Object { status: C.SUCCESS or an Error object
    *                            wasLastItem: true if itemPath folder left emtpy }
    */
-  async renameFile (sourcePath, destinationPath) {
-    debug('%s.renameFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath)
+  async moveFile (sourcePath, destinationPath) {
+    debug('%s.moveFile(\'%s\', \'%s\')', this.constructor.name, sourcePath, destinationPath)
     let status = C.SUCCESS
     let deleteResult
     try {
       if (await this.copyFile(sourcePath, destinationPath, true) === C.SUCCESS) {
         deleteResult = await this.deleteFile(sourcePath)
         if (deleteResult.status === C.SUCCESS) {
-          debug('renameFile() succeeded')
+          debug('moveFile() succeeded')
         }
       }
       return deleteResult

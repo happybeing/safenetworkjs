@@ -117,8 +117,9 @@
       [ ] saveFile(path, contents)
       [ ] loadFile(src)
       [ ] copyFile(src, dest)
-      [ ] renameFile(from, to)
+      [ ] moveFile(from, to)
       [ ] deleteFile(path)
+      [ ] fileExists(path)
       [ ] fileInfo(path)
       [ ] listFolder(path)
       [ ] Support for Directories/Folders
@@ -132,8 +133,8 @@
       [/] _truncateFile(path, fd, size)
       [/] closeFile(path)
       [/] deleteFile(path)
-      [/] renameFile(src, dest) (move)
-      [ ] copyFile(src, dest) (exists on _NfsContainerFiles)
+      [/] moveFile(src, dest) (move)
+      [/] copyFile(src, dest) (exists on _NfsContainerFiles)
       [ ] getFileMetadata(path)
       [ ] setFileMetadata(path)
       [ ] Support for Directories/Folders
@@ -699,6 +700,17 @@ class SafenetworkApi {
    }
 
    /**
+    * Test if a given file exists.
+    *
+    * @param  {String} fileUri
+    * @return {Promise} true if the file exists
+    */
+   fileExists (fileUri) {
+     debug('%s.fileExists(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+     throw new Error('TODO: function not implemented yet')
+   }
+
+   /**
     * Get metadata and status about a file. Can be used to test if file exists.
     *
     * @param  {String} fileUri
@@ -753,8 +765,8 @@ class SafenetworkApi {
     * @param  {String} fileUri
     * @return {Promise} an object indicating the success or reason for failure
     */
-   renameFile  (fileUri) {
-     debug('%s.renameFile(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
+   moveFile  (fileUri) {
+     debug('%s.moveFile(\'%s\') - NOT IMPLEMENTED', this.constructor.name, fileUri)
      throw new Error('TODO: function not implemented yet')
    }
 
