@@ -933,6 +933,7 @@ class SafenetworkApi {
         logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 // ??? do I need to call anything else?
 
+        await this.auth.loginFromUri(this._safeAuthUri)
         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
       } else {
         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
@@ -1658,10 +1659,11 @@ class SafenetworkApi {
   async mutableDataExists (md) {
     try {
       await md.getVersion(md)
-      logApi('mutableDataExists(%s) TRUE', md)
+      logApi('mutableDataExists(%o) TRUE', md)
       return true
     } catch (err) {
-      logApi('mutableDataExists(%s) FALSE', md)
+      logApi(err)
+      logApi('mutableDataExists(%o) FALSE', md)
       return false  // Error indicates this MD doens't exist on the network
     }
   }
@@ -1685,7 +1687,7 @@ class SafenetworkApi {
   //
   // @returns promise which resolves to the services MD of the given name
   async getServicesMdFor (host) {
-    logApi('getServicesMdFor(%s)', host)
+    logApi('%s.getServicesMdFor(%s)', this.constructor.name, host)
     let publicName = host.split('.')[1]
     try {
       if (publicName === undefined) {
