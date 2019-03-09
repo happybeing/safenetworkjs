@@ -3039,6 +3039,7 @@ class SafeServiceLDP extends ServiceInterface {
               itemName = remainder.slice(0, firstSlash + 1) // Directory name with trailing '/'
             }
 
+            // That's it for HEAD, for GET add entries to listing
             if (options.includeBody) {
               debug('safe:TMP 6')
               let testPath = docPath + this.suffixMeta
@@ -3054,10 +3055,11 @@ class SafeServiceLDP extends ServiceInterface {
               debug('safe:TMP 8')
             } // metaFilePath - file not found
             logLdp('calling _addListingEntry for %s', itemName)
-            directoryEntries.push(this._addListingEntry(rdfGraph, fullItemUri, docUri, itemName, metaFilePath))
+            await this._addListingEntry(rdfGraph, fullItemUri, docUri, itemName, metaFilePath)
             debug('safe:TMP 9')
           }
         }
+        resolve()
       }))
     })
     await Promise.all(directoryEntries).catch((err) => {
@@ -3114,7 +3116,7 @@ class SafeServiceLDP extends ServiceInterface {
 
     // Set up a metaFile path
     // Earlier code used a .ttl file as its own meta file, which
-    // caused massive data files to parsed as part of deirectory listings just looking for type triples
+    // caused massive data files to parsed as part of directory listings just looking for type triples
     if (metaFilePath) resourceGraph = this._addFileMetadata(resourcesGraph, metaFilePath, fullItemUri)
 
     return resourceGraph
