@@ -15,6 +15,7 @@ module.exports.SafenetworkApi = Safenetworkjs.SafenetworkApi
 // SafenetworkApi instance with SAFE Client Libs API
 const safeJs = new Safenetworkjs.SafenetworkApi
 safeJs.safeApi = window.safe
+window.safeJs = safeJs
 module.exports.safeJs = safeJs
 
 module.exports.protoFetch = Safenetworkjs.protoFetch

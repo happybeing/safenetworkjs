@@ -483,8 +483,6 @@ const untrustedAppInfo = {
 // Default permissions to request. Optional parameter to SafenetworkApi.simpleAuthorise()
 //
 
-const fullPermissions = ['Read', 'Insert', 'Update', 'Delete', 'ManagePermissions']
-
 const defaultContainerPerms = {
   // The following defaults have been chosen to allow creation of public names
   // and containers, as required for accessing SAFE web services.
@@ -504,6 +502,12 @@ const defaultContainerPerms = {
   _videos: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   _publicNames: ['Read', 'Insert', 'Update', 'Delete'], // TODO maybe reduce defaults later
   NfsContainer: ['Read', 'Insert', 'Update', 'Delete'] // TODO maybe reduce defaults later
+}
+
+const fullPermissions = ['Read', 'Insert', 'Update', 'Delete', 'ManagePermissions']
+
+const defaultPerms = {
+  '_public': defaultContainerPerms['_public']
 }
 
 /**
@@ -901,18 +905,6 @@ class SafenetworkApi {
   async initReadOnly (appInfo = untrustedAppInfo) {
     logApi('%s.initReadOnly(%O)...', this.constructor.name, appInfo)
 
-    // TODO remove when 'connection problems' solved (see dev forum )
-    if (extraDebug) {
-      // DEBUG CODE
-      logApi('DEBUG WARNING using connectAuthorised() NOT connect()')
-      let debugConfig = {
-        id: 'com.happybeing.plume.poc',
-        name: 'SAFE Plume (PoC)',
-        vendor: 'com.happybeing'
-      }
-      return this.simpleAuthorise(debugConfig, defaultPerms)
-    }
-
     let tmpAppHandle
     try {
       tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
@@ -931,7 +923,6 @@ class SafenetworkApi {
 
         this._safeAuthUri = await this.safeApi.authorise(connUri)
         logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-// ??? do I need to call anything else?
 
         await this.auth.loginFromUri(this._safeAuthUri)
         this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
