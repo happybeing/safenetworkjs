@@ -634,6 +634,37 @@ class SafenetworkApi {
   }
 
   /**
+   * Return a suitable HTTP response object for a SAFE nodejs API error
+   * @param  {String} method http method
+   * @param  {Error}  err    error thrown by SAFE API
+   * @return {Response}
+   */
+  // References:
+  // https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
+  // https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
+  _httpResponseError (method, err) {
+    let r
+    switch(err.code) {
+      case CONSTANTS.ERROR_CODE.ACCESS_DENIED:
+        // TODO should include a response header
+        r = new Response(null, {status: 401, statusText: 'Unauthorised (' + err + ')'})
+      break;
+      case CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY:
+      case CONSTANTS.ERROR_CODE.NFS_FILE_NOT_FOUND:
+        // TODO when appendable data, could/should this re-direct to old version?
+        r = new Response(null, {status: 404, statusText: 'Not found (' + err + ')'})
+      break;
+      case CONSTANTS.ERROR_CODE.LOW_BALANCE:
+        r = new Response(null, {status: 402, statusText: 'Insuffcient PUT balance (' + err + ')'})
+        this.enableLowBalanceWarning()
+      break;
+      default:
+        r = new Response(null, {status: 500, statusText: '500 Internal Server Error (' + err + ')'})
+    }
+    return r
+  }
+
+  /**
    * Enable the SAFE Services API
    *
    * There is a default service setup for 'www' so that apps can
@@ -2226,15 +2257,15 @@ class ServiceInterface {
 
   /*
   * To provide a new SAFE web service extend this class to:
-  * - provide a constructor which calls super(safeWeb) and initialises
+  * - provide a constructor which calls super(safeJs) and initialises
   *   the properties of this._serviceConfig
   * - enable the service for a given SAFE host (safe://[profile].public-name)
   *
   * Refer to class SafeServiceLDP for guidance.
   */
 
-  constructor (safeWeb) {
-    this._safeWeb = safeWeb
+  constructor (safeJs) {
+    this.safeJs = safeJs
 
     // Should be set in service implementation constructor:
     this._serviceConfig = {}
@@ -2248,8 +2279,8 @@ class ServiceInterface {
   // Free any cached DOM API handles (should be called by anything discarding an active service)
   freeHandles () {}
 
-  safeWeb () { return this._safeWeb }
-  appHandle () { return this._safeWeb.appHandle() }
+  safeJs () { return this.safeJs }
+  appHandle () { return this.safeJs.appHandle() }
   getName () { return this.getServiceConfig().friendlyName }
   getDescription () { return this.getServiceConfig().description }
   getIdString () { return this.getServiceConfig().idString }
@@ -2296,7 +2327,7 @@ class ServiceInterface {
     logApi('%s.makeServiceInstance(%s,%s) - NOT YET IMPLEMENTED', this.constructor.name, host, serviceValue)
     throw ('%s.makeServiceInstance() not implemented for ' + this.getName() + ' service', this.constructor.name)
     /* Example:
-    let hostService = await new this.constructor(this.safeWeb())
+    let hostService = await new this.constructor(this.safeJs)
     hostService._host = host
     hostService._serviceConfig = this.getServiceConfig()
     hostService._serviceValue = serviceValue
@@ -2326,8 +2357,8 @@ class ServiceInterface {
 // the basics of providing an implementation. Other implementations would
 // probably best be in separate files.
 class SafeServiceWww extends ServiceInterface {
-  constructor (safeWeb) {
-    super(safeWeb)
+  constructor (safeJs) {
+    super(safeJs)
 
     // Service configuration (maps to a SAFE API Service)
     this._serviceConfig = {
@@ -2384,7 +2415,7 @@ class SafeServiceWww extends ServiceInterface {
   // @returns a promise which resolves to a new instance of this service for the given host
   async makeServiceInstance (host, serviceValue) {
     logLdp('%s.makeServiceInstance(%s,%s)', this.constructor.name, host, serviceValue)
-    let hostService = await new this.constructor(this.safeWeb())
+    let hostService = await new this.constructor(this.safeJs)
     hostService._host = host
     hostService._serviceConfig = this.getServiceConfig()
     hostService._serviceValue = serviceValue
@@ -2426,8 +2457,8 @@ const ns = require('solid-namespace')($rdf)
 // TODO update to use SafeNfsContainer instead of calling SAFE NFS APIs
 
 class SafeServiceLDP extends ServiceInterface {
-  constructor (safeWeb) {
-    super(safeWeb)
+  constructor (safeJs) {
+    super(safeJs)
 
     // TODO: info expires after 5 minutes (is this a good idea?)
     this._fileInfoCache = new safeUtils.Cache(60 * 5 * 1000)
@@ -2524,19 +2555,19 @@ class SafeServiceLDP extends ServiceInterface {
       publicName = host
       uriProfile = ''
     }
-    let serviceKey = this.safeWeb().makeServiceEntryKey(uriProfile, this.getIdString())
+    let serviceKey = this.safeJs.makeServiceEntryKey(uriProfile, this.getIdString())
 
     let serviceValue = ''   // Default is do nothing
     let setup = this.getServiceConfig().setupDefaults
     if (setup.setupNfsContainer) {
-      let nameAndTag = await this.safeWeb().createNfsContainerMd(setup.defaultSafeContainer, publicName, setup.defaultContainerName, this.getTagType())
+      let nameAndTag = await this.safeJs.createNfsContainerMd(setup.defaultSafeContainer, publicName, setup.defaultContainerName, this.getTagType())
 
       serviceValue = nameAndTag.name.buffer
-      await this.safeWeb().setMutableDataValue(servicesMd, serviceKey, serviceValue)
+      await this.safeJs.setMutableDataValue(servicesMd, serviceKey, serviceValue)
       // TODO remove this excess DEBUG:
       if (extraDebug) {
         logLdp('Pubic name \'%s\' services:', publicName)
-        await this.safeWeb().listMd(servicesMd, publicName + ' public name MD')
+        await this.safeJs.listMd(servicesMd, publicName + ' public name MD')
       }
     }
     return serviceValue
@@ -2551,7 +2582,7 @@ class SafeServiceLDP extends ServiceInterface {
   // @returns a promise which resolves to a new instance of this service for the given host
   async makeServiceInstance (host, serviceValue) {
     logLdp('%s.makeServiceInstance(%s,%s)', this.constructor.name, host, serviceValue)
-    let hostService = await new this.constructor(this.safeWeb())
+    let hostService = await new this.constructor(this.safeJs)
     hostService._host = host
     hostService._serviceConfig = this.getServiceConfig()
     hostService._serviceValue = serviceValue
@@ -2720,7 +2751,7 @@ class SafeServiceLDP extends ServiceInterface {
 
   async delete (docUri, options) {
     logLdp('%s.delete(%s,%O)', this.constructor.name, docUri, options)
-    let docPath = this.safeWeb().nfsPathPart(docUri)
+    let docPath = this.safeJs.nfsPathPart(docUri)
 
     try {
       let fileInfo = await this._getFileInfo(itemPathPart(docUri))
@@ -2747,10 +2778,9 @@ class SafeServiceLDP extends ServiceInterface {
         return new Response(null, {status: 204, statusText: '204 No Content'})
       }
     } catch (err) {
-      logLdp('%s.delete() failed: %s', err)
+      logLdp('%s.delete() failed: %s', this.constructor.name, err)
       this._fileInfoCache.delete(docUri)
-      // TODO can we decode the SAFE API errors to provide better error responses
-      return new Response(null, {status: 500, statusText: '500 Internal Server Error (' + err + ')'})
+      return this.safeJs._httpResponseError('DELETE', err)
     }
   }
 
@@ -2779,7 +2809,7 @@ class SafeServiceLDP extends ServiceInterface {
   // @returns promise which resolves to a Resonse object
   async _updateFile (docUri, body, contentType, options) {
     logLdp('%s._updateFile(\'%s\',%O,%o,%O)', this.constructor.name, docUri, body, contentType, options)
-    let docPath = this.safeWeb().nfsPathPart(docUri)
+    let docPath = this.safeJs.nfsPathPart(docUri)
 
     try {
       // mrhTODO GoogleDrive only I think:
@@ -2827,10 +2857,10 @@ class SafeServiceLDP extends ServiceInterface {
   // TODO add header links addLinks() - see node-solid-server/lib/handlers/post.js function one ()
   async _createFile (docUri, body, contentType, options) {
     logLdp('%s._createFile(\'%s\',%O,%o,%O)', this.constructor.name, docUri, body, contentType, options)
-    let docPath = this.safeWeb().nfsPathPart(docUri)
+    let docPath = this.safeJs.nfsPathPart(docUri)
 
     try {
-      this.safeWeb().listContainer('_publicNames') // TODO remove this debug
+      this.safeJs.listContainer('_publicNames') // TODO remove this debug
 
       // logLdp('DEBUG:  this.storageNfs().create()...')
       let nfsFile = await (await this.storageNfs()).create(body)
@@ -2865,12 +2895,12 @@ class SafeServiceLDP extends ServiceInterface {
   // TODO add support for data browser node-solid-server/lib/handlers/get.js
   async _getFile (docUri, options) {
     logLdp('%s._getFile(%s,%O)', this.constructor.name, docUri, options)
-    let docPath = this.safeWeb().nfsPathPart(docUri)
+    let docPath = this.safeJs.nfsPathPart(docUri)
     let fileInfo = {}
     let nfsFile
     let retResponse
     try {
-      if (!this.safeWeb().isConnected()) {
+      if (!this.safeJs.isConnected()) {
         return new Response(null, {status: 503, statusText: '503 not connected to SAFE network'})
       }
 
@@ -2884,7 +2914,7 @@ class SafeServiceLDP extends ServiceInterface {
       } catch (err) {
         return new Response(null, {status: 404, statusText: '404 File not found'})
       }
-      fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeWeb().safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+      fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
       logLdp('safeNfs.open() returns handle: %o', fileInfo.openHandle)
 
       var etagWithoutQuotes = fileInfo.ETag
@@ -2972,7 +3002,7 @@ class SafeServiceLDP extends ServiceInterface {
 
   async _getFolder (docUri, options) {
     logLdp('%s._getFolder(%s,%O)', this.constructor.name, docUri, options)
-    let docPath = this.safeWeb().nfsPathPart(docUri)
+    let docPath = this.safeJs.nfsPathPart(docUri)
     let response
 
     // TODO delete this
@@ -3192,7 +3222,7 @@ class SafeServiceLDP extends ServiceInterface {
     try {
       // Metadata file exists
       if (nfsFile) {
-        fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeWeb().safeApi.CONSTANTS.NFS_FILE_MODE_READ)
+        fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
         let content = await fileInfo.openHandle.read(0, fileInfo.size)
 
         if (content) {
@@ -3240,6 +3270,10 @@ class SafeServiceLDP extends ServiceInterface {
     resourceGraph.add(resourceGraph.sym(reqUri),
     ns.stat('size'),
     fileInfo.size)
+
+    resourceGraph.add(resourceGraph.sym(reqUri),
+    ns.stat('mtime'),
+    fileInfo.modified)
 
     resourceGraph.add(resourceGraph.sym(reqUri),
     ns.dct('modified'),
@@ -3346,7 +3380,7 @@ class SafeServiceLDP extends ServiceInterface {
 }
 
 // Usage: create the web API and install the built in services
-// let safeWeb = new SafenetworkApi()
+// let safeJs = new SafenetworkApi()
 
 module.exports.SafenetworkApi = SafenetworkApi
 
@@ -3362,7 +3396,7 @@ const protoFetch = require('proto-fetch')
 const fetch = protoFetch({
   http: httpFetch,
   https: httpFetch
-//  safe: safeWeb.fetch.bind(safeWeb)
+//  safe: safeJs.fetch.bind(safeJs)
 //  https: Safenetwork.fetch.bind(Safenetwork), // Debugging with SAFE mock browser
 })
 
