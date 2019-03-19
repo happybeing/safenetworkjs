@@ -9,7 +9,8 @@
     "test": "echo No tests yet!",
     "doc": "jsdoc src -r -d docs || true",
     "build": "webpack --mode production --verbose --colors --config webpack.config.js",
-    "dev": "webpack --watch --mode development --verbose --colors --config webpack.config.js"
+    "dev": "webpack --watch --mode development --verbose --colors --config webpack.config.js",
+    "buildsac": "webpack --mode production --verbose --colors --config webpack.config.js && cp ./dist/* ~/src/solid/solid-auth-client/src"
   },
   "repository": {
     "type": "git",
