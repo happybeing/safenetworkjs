@@ -14,8 +14,8 @@ module.exports.SafenetworkApi = Safenetworkjs.SafenetworkApi
 
 // SafenetworkApi instance with SAFE Client Libs API
 const safeJs = new Safenetworkjs.SafenetworkApi
-safeJs.safeApi = window.safe
 window.safeJs = safeJs
+safeJs.safeApi = require('./bootstrap-web')
 module.exports.safeJs = safeJs
 
 module.exports.protoFetch = Safenetworkjs.protoFetch
