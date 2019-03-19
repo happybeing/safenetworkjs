@@ -1,7 +1,5 @@
 /*
-MIT License
-
-APPLICABLE TO THIS FILE ONLY: safe-app-cli.js which is adapted from
+MIT License APPLICABLE TO THIS FILE ONLY which is adapted from
 https://github.com/project-decorum/decorum-lib/src/Safe.ts
 commit: 1d08f743e60c7953169290abaa37179de3508862
 
@@ -56,20 +54,33 @@ debug = function (d) {
 // No stdout from node-ipc
 // ipc.config.silent = true
 
-// Request permissions on a shared MD
-Safe.fromUri = async (app, uri) => {
-  debug('fromUri(app, %s)', uri)
-  await app.auth.openUri(uri)
+// Request permissions on a shared MD, return SAFE auth URI
+Safe.fromUri = async (app, authReqUri) => {
+  debug('fromUri(app, %s)', authReqUri)
 
-  const uri2 = await ipcReceive(String(process.pid))
+  await app.auth.openUri(authReqUri)
+  const safeAuthUri = await ipcReceive(String(process.pid))
+  return app.auth.loginFromUri(safeAuthUri)
+}
 
-  return app.auth.loginFromUri(uri2)
+// Request unauthorised connection (read-only access to network)
+Safe.initUnauthorised = async (appInfo = untrustedAppInfo, networkStateCallback, appOptions, argv) =>  {
+  const connectAuthorised = false
+  return Safe._init(appInfo, undefined,
+    networkStateCallback, undefined, appOptions, argv, connectAuthorised)
 }
 
 // Request authorisation
-Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
+Safe.initAuthorised = async (appInfo, appContainers,
+  networkStateCallback, authOptions, appOptions, argv) => {
+  const connectAuthorised = true
+  return Safe._init(appInfo, appContainers,
+    networkStateCallback, authOptions, appOptions, argv, connectAuthorised)
+}
+
+Safe._init = async (appInfo, appContainers, networkStateCallback, authOptions, appOptions, argv) => {
   debug('__dirname: ' + String(__dirname))
-  debug('\nSafe.bootstrap()\n  with appInfo: ' + JSON.stringify(appInfo) +
+  debug('\nSafe.initAuthorised()\n  with appInfo: ' + JSON.stringify(appInfo) +
     '  argv: ' + JSON.stringify(argv))
 
   const options = {
@@ -91,15 +102,17 @@ Safe.bootstrap = async (appInfo, appContainers, containerOpts, argv) => {
   if (argv.uri !== undefined) {
     uri = argv.uri
   } else {
-    await authorise(process.pid, appInfo, appContainers, containerOpts, options)
+    await authorise(process.pid, appInfo, appContainers, networkStateCallback, authOptions, appOptions)
     debug('ipcReceive(' + process.pid + ')')
     uri = await ipcReceive(String(process.pid))
   }
 
-  return Safe.fromAuthUri(appInfo, uri, null, options)
+  return Safe.fromAuthUri(appInfo, uri, null, appOptions)
 }
 
-async function authorise (pid, appInfo, appContainers, containerOpts, options) {
+async function authorise (pid, appInfo, appContainers, networkStateCallback, authOptions, appOptions, connectAuthorised) {
+  connectAuthorised = (connectAuthorised === undefined ? true : false)
+
   // For development can provide a pre-compiled cmd to receive the auth URL
   // This allows the application to be run and debugged using node
   if (!appInfo.customExecPath) {
@@ -110,11 +123,18 @@ async function authorise (pid, appInfo, appContainers, containerOpts, options) {
     ]
   }
   debug('call Safe.initialiseApp() with \nappInfo: ' + JSON.stringify(appInfo) +
-    '\noptions: ' + JSON.stringify(options))
-  const app = await Safe.initialiseApp(appInfo, undefined, options)
+    '\noptions: ' + JSON.stringify(appOptions))
+
+  const app = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
   debug('call app.auth.genAuthUri() with appContainers: \n' + JSON.stringify(appContainers) +
-    '\ncontainerOpts: \n' + JSON.stringify(containerOpts))
-  const uri = await app.auth.genAuthUri(appContainers, containerOpts)
+    '\nappOptions: \n' + JSON.stringify(authOptions))
+
+  let uri
+  if (connectAuthorised) {
+    uri = await app.auth.genAuthUri(appContainers, authOptions)
+  } else {
+    uri = await app.auth.getConnUri()
+  }
 
   debug('call app.auth.openUri() with uri: \n' + JSON.stringify(uri.uri))
   await app.auth.openUri(uri.uri)

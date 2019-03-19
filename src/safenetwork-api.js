@@ -1,7 +1,7 @@
 /* TODO theWebalyst:
 [/] npm link for development of safenetwork-fuse
 [x] get simple auth working so safenetwork-fuse auths with mock
-  -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setApp()
+  -> CLI, so uses .fromAuthUri() then calls SafenetworkApi.setSafeAppHandle()
 [/] First release v0.1.0:
     safe-containers.js wrappers for default containers with simplified JSON
     file system like interface for each:
@@ -473,14 +473,14 @@ const getBaseUri = safeUtils.getBaseUri
 *
 */
 
-// For connection without authorisation (see initReadOnly)
+// For connection without authorisation (see initUnauthorised())
 const untrustedAppInfo = {
   id: 'Untrusted',
   name: 'Do NOT authorise this app',
   vendor: 'Untrusted'
 }
 
-// Default permissions to request. Optional parameter to SafenetworkApi.simpleAuthorise()
+// Default permissions to request. Optional parameter to SafenetworkApi.initAuthorised()
 //
 
 const defaultContainerPerms = {
@@ -490,7 +490,7 @@ const defaultContainerPerms = {
   // ref: https://github.com/maidsafe/rfcs/blob/master/text/0046-new-auth-flow/containers.md
   //
   // If your app doesn't need those features it can use a customised list
-  // and specify only the permissions it needs when calling SafenetworkApi.simpleAuthorise()
+  // and specify only the permissions it needs when calling SafenetworkApi.initAuthorised()
   //
   // If your app needs extra permissions (e.g. 'ManagePermissions') it must
   // use a custom list.
@@ -506,7 +506,7 @@ const defaultContainerPerms = {
 
 const fullPermissions = ['Read', 'Insert', 'Update', 'Delete', 'ManagePermissions']
 
-const defaultPerms = {
+const defaultAppContainers = {
   '_public': defaultContainerPerms['_public']
 }
 
@@ -529,10 +529,6 @@ class SafenetworkApi {
 
   constructor () {
     logApi('SafenetworkApi()')
-    this._safeAppInfo = undefined
-    this._safeAppContainers = undefined
-    this._safeContainerOpts = undefined
-    this._safeAuthUri = undefined
 
     // Access to SAFE API (DOM or NodeJS)
     // Must be set by either:
@@ -554,11 +550,19 @@ class SafenetworkApi {
     // SAFE Network Services
     this._activeServices = new Map()    // Map of host (profile.public-name) to a service instance
 
-    // DOM API settings and and authorisation status
+    // SAFE API settings and and authorisation status
     this._safeAuthUri = ''
     this._isConnected = false
     this._isAuthorised = false
-    this._authOnAccessDenied = false  // Used by simpleAuthorise() and fetch()
+    this._authOnAccessDenied = false  // Used by initAuthorised() and fetch()
+
+    // Default callback
+    if (typeof this._networkStateCallback !== 'function') {
+      this._networkStateCallback = (newState) => {
+        logApi('SafeNetwork state changed to: ', newState)
+        this._isConnected = newState
+      }
+    }
 
     // Cached API Objects
     this._defaultContainers = {}  // Active default container objects (PublicContainer/PrivateContainer/PublicNamesContainer)
@@ -566,7 +570,7 @@ class SafenetworkApi {
 
     // Application specific configuration required for authorisation
     this._safeAppInfo = {}
-    this._safeAppPermissions = {}
+    this._safeAppContainers = {}
 
     /*
     * Making everything available on the instance removes need to maintain
@@ -897,14 +901,14 @@ class SafenetworkApi {
 
   /**
    * authorise with SAFE Network - for desktop apps (non-browser)
-   *
+   * DEPRACATED
    * @param  {object}  appInfo     See SAFE API docs
    * @param  {object}  appContainers See SAFE API docs
    * @param  {object}  containerOpts See SAFE API docs
    * @param  {object}  argv          TODO ???
    * @return {Promise}
    */
-  async authoriseWithSafeBrowser (appInfo, appContainers, containerOpts, argv) {
+   async DEPRACATEDauthoriseWithSafeBrowser (appInfo, appContainers, containerOpts, argv) {
     // bootstrap is for auth from nodeJs and CLI
     this.safeApi.bootstrap(appInfo, appContainers, containerOpts, argv).then((safeApp) => {
       this.setSafeAppHandle(safeApp)
@@ -915,26 +919,52 @@ class SafenetworkApi {
     }).catch((e) => debug('%s constructor - error calling bootstrap() to authorise with SAFE Network'))
   }
 
-  // Read only connection with SAFE network (can authorise later)
-  //
-  // Before you can use the SafenetworkApi methods, you must init and connect
-  // with SAFE network. This function provides *read-only* init and connect, but
-  // you can authorise subsequently using authAfterInit(), or directly with the
-  // DOM API.
-  //
-  // - if using this method you don't need to do anything with the returned SAFEAppHandle
-  // - if authorising using another method, you MUST call SafenetworkApi.setApi()
-  //   with a valid SAFEAppHandle
-  //
-  // @param [optional] appInfo - information for auth UI, if ommitted generic
-  //                - see DOM API this.safeApi.initialise()
-  //
-  // @returns a DOM API SAFEAppHandle, see this.safeApi.initialise()
-  //
+/**
+ * Save initial app settings
+ *
+ * @param  {Object} appInfo       information about your app (see SAFE API)
+ * @param  {Object} appContainers [optional] desired container permissions
+ * @param  {appOptions} appOptions [optional] SAFEApp options
+ * @param  {Boolean} [optional] enableAutoAuth if true, attempt to authorise after access denied
+ *
+ * See SAFEApp.initialiseApp()
+ */
+  _initialAppSettings (appInfo, appContainers, appOptions, enableAutoAuth) {
+    this._authOnAccessDenied = (enableAutoAuth ? enableAutoAuth : false)
+    this._safeAppInfo = appInfo
+    this._safeAppContainers = (appContainers !== undefined ? appContainers : defaultAppContainers)
+    this._safeAppOptions = appOptions
+  }
 
-  // TODO review/update initReadOnly()
+  /**
+   * Initialise SafenetworkApi and read-only connection to SAFE Network
+   *
+   * Before you can use the SafenetworkApi methods, you must init and connect
+   * with SAFE network. This function provides *read-only* init and connect, but
+   * you can authorise subsequently using initAuthorised(), or directly with the
+   * SAFE API.
+   *
+   *  - if using this method you don't need to do anything with the returned SAFEAppHandle
+   *  - if authorising using another method you MUST call SafenetworkApi.setSafeAppHandle()
+   *    with a valid SAFEAppHandle
+   *
+   * @param  {Object} [appInfo=untrustedAppInfo] information about app for auth UI, if ommitted generic 'untrusted' will appear.
+   * @param  {appOptions} appOptions [optional] SAFEApp options
+   * @param  {Object}  argv [optional] required only for command lin authorisation
+   * @return {Promise}  SAFEAppHandle.
+   *
+   * Note: see SAFE API initialiseApp()
+   */
+  async initUnauthorised (appInfo, appOptions, argv) {
+    logApi('%s.initUnauthorised(%O)...', this.constructor.name, appInfo)
+    this._initialAppSettings(appInfo ? appInfo : untrustedAppInfo, undefined, appOptions)
+    return this.setSafeAppHandle(await this.safeApi.initUnauthorised(appInfo, appOptions, this._networkStateCallback, argv))
+  }
+
+  // TODO - DEPRECATED
   async initReadOnly (appInfo = untrustedAppInfo) {
-    logApi('%s.initReadOnly(%O)...', this.constructor.name, appInfo)
+    // TODO review/update
+    logApi('%s.initReadOnly(%O) is DEPRECATED, use initUnauthorised() instead', this.constructor.name, appInfo)
 
     let tmpAppHandle
     try {
@@ -947,7 +977,7 @@ class SafenetworkApi {
       logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
       this.setSafeAppHandle(tmpAppHandle)
       this._safeAppInfo = appInfo
-      this._safeAppPermissions = undefined
+      this._safeAppContainers = undefined
       if (window) {
         let connUri = await this.auth.genConnUri()
         logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
@@ -970,7 +1000,7 @@ class SafenetworkApi {
   }
 
   /**
-   * one-step authorisation with SAFE network - for web apps (in SAFE Browser)
+   * Initialise SafenetworkApi and authorised connection to SAFE Network
    *
    * This function provides simplified, one step authorisation. As an
    * alternative you can authorise separately using the SAFE API to
@@ -979,10 +1009,22 @@ class SafenetworkApi {
    *
    * @param  {Object}  appInfo       information about your app (see SAFE API)
    * @param  {Object}  appContainers [optional] permissions to request on containers
+   * @param  {Boolean} ownContainer [optional] true to create/access app 'own_container'. See SAFEApp.genAuthUri()
+   * @param  {InitOptions} appOptions [optional] override default SAFEApp options
+   * @param  {Object}  argv [optional] required only for command lin authorisation
    * @return {Promise}
    */
+  async initAuthorised  (appInfo, appContainers, ownContainer, appOptions, argv) {
+    logApi('%s.initAuthorised(%O, %O, %s, %O, %O)...', this.constructor.name, appInfo, appContainers, ownContainer, appOptions, argv)
+    this._initialAppSettings(appInfo, appContainers, appOptions, true /*enableAutoAuth*/)
+    let authOptions = (ownContainer ? { own_container: true } : undefined)
+
+    return this.setSafeAppHandle(await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv))
+  }
+
+  // TODO - DEPRECATED
   async simpleAuthorise (appInfo, appContainers) {
-    logApi('%s.simpleAuthorise(%O,%O)...', this.constructor.name, appInfo, appContainers)
+    logApi('%s.simpleAuthorise(%O,%O) is DEPRECATED, use initAuthorised() instead', this.constructor.name, appInfo, appContainers)
 
     // TODO ??? not sure what I'm thinking here...
     // TODO probably best to have initialise called once at start so can
@@ -1007,10 +1049,10 @@ class SafenetworkApi {
       this.setSafeAppHandle(tmpAppHandle)
       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
       this._safeAppInfo = appInfo
-      this._safeAppPermissions = (appContainers !== undefined ? appContainers : defaultPerms)
+      this._safeAppContainers = (appContainers !== undefined ? appContainers : defaultAppContainers)
 
       // await this.testsNoAuth();  // TODO remove (for test only)
-      let authReqUri = await this.auth.genAuthUri(this._safeAppPermissions, this._safeAppInfo.options)
+      let authReqUri = await this.auth.genAuthUri(this._safeAppContainers, this._safeAppInfo.options)
       this._safeAuthUri = await this.safeApi.authorise(authReqUri)
       logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
 
@@ -1120,8 +1162,9 @@ class SafenetworkApi {
             name: nat.name,
             'perms': perms
           }]
+          // Request permissionsand retry
           const uri = await this.auth.genShareMDataUri(mdPermissions)
-          await this.safeApi.fromUri(this.safeApp, uri)
+          this._safeAuthUri = await this.safeApi.fromUri(this.safeApp, uri)
           result = await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
         } catch (e) { error(e); return e }
       } else {
@@ -2056,7 +2099,7 @@ class SafenetworkApi {
       try {
         if (err.status === '401' && this._authOnAccessDenied && allowAuthOn401) {
           allowAuthOn401 = false // Once per fetch attempt
-          await this.simpleAuthorise(this._safeAppInfo, this._safeAppPermissions)
+          await this.initAuthorised(this._safeAppInfo, this._safeAppContainers)
           return this._fetch(docUri, options)
         }
       } catch (err) {
@@ -2773,7 +2816,9 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('                 param path: ' + docPath)
         logLdp('                 param version: ' + fileInfo.version)
         logLdp('                 param containerVersion: ' + fileInfo.containerVersion)
-        await (await this.storageNfs()).delete(docPath, fileInfo.version + 1)
+        let perms // if auth is needed, request default permissions
+        await safeJs.nfsMutate(await this.storageNfs(), perms, 'delete', docPath, undefined, fileInfo.version + 1)
+//        await (await this.storageNfs()).delete(docPath, fileInfo.version + 1)
         this._fileInfoCache.delete(docUri)
         return new Response(null, {status: 204, statusText: '204 No Content'})
       }
@@ -3271,9 +3316,9 @@ class SafeServiceLDP extends ServiceInterface {
     ns.stat('size'),
     fileInfo.size)
 
-    resourceGraph.add(resourceGraph.sym(reqUri),
-    ns.stat('mtime'),
-    fileInfo.modified)
+    // resourceGraph.add(resourceGraph.sym(reqUri),
+    // ns.stat('mtime'),
+    // fileInfo.modified)
 
     resourceGraph.add(resourceGraph.sym(reqUri),
     ns.dct('modified'),
