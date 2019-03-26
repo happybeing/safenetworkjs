@@ -702,7 +702,7 @@ class SafenetworkApi {
    */
   initialiseServices () {
     // Enable the standard SAFE www service API
-    // Need to implement NOT IMPLEMENTED functions on SafeServiceWww before enabling this (see implementations on SafeServicesLDP)
+    // Need to implement NOT IMPLEMENTED functions on SafeServiceWww before enabling this (see implementations on SafeServiceLDP)
     // this.setServiceImplementation(new SafeServiceWww(this))
 
     // This is currently using 'www' instead of 'LDP' due to issue in WHM (possibly fixed)
