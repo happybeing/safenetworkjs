@@ -323,7 +323,7 @@ class NfsFileState {
       if (this._fileOpened) await this._fileOpened.close()
       return C.SUCCESS
     } catch (e) { error(e); return e }
-    return new Error('Unknown error creating NFS file')
+    return new Error('Unknown error closing NFS file')
   }
 }
 
