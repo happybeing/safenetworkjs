@@ -35,7 +35,7 @@ const containerTypeCodes = {
   file: 'file',                     // an entry that doesn't end with slash
   newFile: 'new-file',              // created, awaiting closeFile(), not yet stored in container
   fakeContainer: 'fake-container',  // a path ending with '/' that matches part of an entry (default is we fake attributes of a container)
-  deletedEntry: 'deleted-entry',    // entry exists, but value has been deleted()
+  lt: 'deleted-entry',    // entry exists, but value has been deleted()
   servicesContainer: 'services-container',  // Services container for a public name
   service: 'service',               // Services container for a public name
   childContainerItem: 'child-container-item', // Need to get type from child container
@@ -164,9 +164,9 @@ class SafeContainer {
   constructor (safeJs, containerName, containerPath, subTree, parent, parentEntryKey, tagType) {
     this._safeJs = safeJs       // SafenetworkJs instance
     this._name = containerName
-    this._containerPath = containerPath + (u.isFolder(containerPath, '/') ? '' : '/')
+    this._containerPath = containerPath + (u.isNfsFolder(containerPath) ? '' : '/')
     if (!subTree) subTree = ''
-    this._subTree = subTree + (subTree.length && !u.isFolder(subTree, '/') ? '/' : '')
+    this._subTree = subTree + (subTree.length && !u.isNfsFolder(subTree) ? '/' : '')
     this._parent = parent
     this._parentEntryKey = parentEntryKey
     this._tagType = tagType
@@ -669,7 +669,7 @@ class SafeContainer {
       let folderMatch = this._subTree + folderPath
 
       // For matching we ignore a trailing '/' so remove if present
-      folderMatch = (u.isFolder(folderMatch, '/') ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
+      folderMatch = (u.isNfsFolder(folderMatch) ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
 
       let listingQ = []
       let entries = await this._mData.getEntries()
@@ -681,7 +681,7 @@ class SafeContainer {
             let plainKey = decodedEntry.plainKey
 
           // For matching we ignore a trailing '/' so remove if present
-            let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+            let matchKey = (u.isNfsFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
             debugEntry('Match Key      : ', matchKey)
             debugEntry('Folder Match   : ', folderMatch)
             // Ignore metadata entries
@@ -705,7 +705,9 @@ class SafeContainer {
                 debugEntry('listing-2.push(\'%s\')', item)
                 listing.push(item)
               }
-            } else if (folderMatch.indexOf(plainKey) === 0) {
+            } else if (folderMatch.indexOf(plainKey) === 0 &&
+            (folderMatch.charAt(plainKey.length) === '/' ||
+            folderMatch === plainKey)) {
               // We've matched the key of a child container, so pass to child
               let matchedChild = await this._getContainerForKey(plainKey)
               let subFolder = folderMatch.substring(plainKey.length)
@@ -763,7 +765,7 @@ class SafeContainer {
       // such as 'index.html' or 'images/profile-picture.png'
 
       // For matching we ignore a trailing '/' so remove if present
-      let itemMatch = (u.isFolder(itemPath, '/') ? itemPath.substring(0, itemPath.length - 1) : itemPath)
+      let itemMatch = (u.isNfsFolder(itemPath) ? itemPath.substring(0, itemPath.length - 1) : itemPath)
 
       // We add this._subTree to the front of the path
       itemMatch = this._subTree + itemMatch
@@ -791,7 +793,7 @@ class SafeContainer {
               //   debugEntry('Key (encrypted): ', entry.key.toString())
 
               // For matching we ignore a trailing '/' so remove if present
-              let matchKey = (u.isFolder(plainKey, '/') ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+              let matchKey = (u.isNfsFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
               debugEntry('Key            : ', plainKey)
               debugEntry('Match Key      : ', matchKey)
 
@@ -882,7 +884,7 @@ class SafeContainer {
         type = containerTypeCodes.defaultContainer
       } else {
         // Check for fakeContainer or NFS container
-        let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
+        let itemAsFolder = (u.isNfsFolder(itemPath) ? itemPath : itemPath + '/')
         let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
         if (shortestEnclosingKey) {
           if (shortestEnclosingKey.length !== itemPath.length) {
@@ -1372,7 +1374,7 @@ class SafeContainer {
     let nextDir = itemPath
     while (nextDir !== '') {
       this._clearResultForPath(nextDir, '*')
-      nextDir = this._safeJs.parentPathNoDot(nextDir)
+      nextDir = u.parentPathNoDot(nextDir)
     }
   }
 
@@ -1971,13 +1973,11 @@ class NfsContainer extends SafeContainer {
       if (fileState) {
         if (!fileState.isDeletedFile()) {
           type = containerTypeCodes.file
-        } else {
-          type = containerTypeCodes.deletedEntry
         }
         this._files._destroyFileState(fileState)
       }
       // Check for a defaultContainer or fakeContainer
-      if (!type || type === containerTypeCodes.deletedEntry) {
+      if (!type) {
         let itemKey = this._subTree + itemPath
         let value = await this.getEntryValue(itemKey)
         if (value) {  // itemPath exact match with entry key, so determine entry type for this container
@@ -1986,7 +1986,7 @@ class NfsContainer extends SafeContainer {
           type = containerTypeCodes.defaultContainer
         } else {
           // Check for fakeContainer or NFS container
-          let itemAsFolder = (u.isFolder(itemPath, '/') ? itemPath : itemPath + '/')
+          let itemAsFolder = (u.isNfsFolder(itemPath) ? itemPath : itemPath + '/')
           let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
           if (shortestEnclosingKey) {
             type = containerTypeCodes.fakeContainer
@@ -2080,15 +2080,10 @@ class NfsContainer extends SafeContainer {
           fileState = await this._files._fetchFileState(itemPath, /* fromNetwork */ true)
         }
 
-        if (fileState) {
-          if (fileState.isDeletedFile()) {
-            type = containerTypeCodes.deletedEntry
-          } else {
+        if (fileState && !fileState.isDeletedFile()) {
             type = containerTypeCodes.file
-          }
-        } else {
-          type = await this.itemType(itemPath)
         }
+        type = await this.itemType(itemPath)
 
         if (type === containerTypeCodes.file) {
           // File (or new file if fileState._fileFetched is undefined)
@@ -2100,17 +2095,6 @@ class NfsContainer extends SafeContainer {
             size: file ? await fileState._fileFetched.size() : 0,
             version: file ? file.version : 0,
             'isFile': true,
-            entryType: type
-          }
-        } else if (type === containerTypeCodes.deletedEntry) {
-          // Deleted entry
-          result = {
-            modified: 0,
-            accessed: 0,
-            created: 0,
-            size: 0,
-            version: -1,
-            'isFile': false,
             entryType: type
           }
         } else if (type === containerTypeCodes.fakeContainer) {
@@ -2216,7 +2200,7 @@ class NfsContainer extends SafeContainer {
   async closeFile (itemPath, fd) {
     debug('%s.closeFile(\'%s\', %s)', this.constructor.name, itemPath, fd)
     try {
-      return this._files.closeFile(itemPath, fd)
+      return await this._files.closeFile(itemPath, fd)
     } catch (e) {
       error(e)
       return e

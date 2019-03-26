@@ -6,7 +6,11 @@ const path = require('path')  // Cross platform itemPath handling
 
 const isFolder = function (itemPath, separator) {
   if (!separator) separator = path.sep
-  return (itemPath.substring(itemPath.length - 1) === separator)
+  return (itemPath.slice(-1) === separator)
+}
+
+const isNfsFolder = function (itemPath) {
+  return itemPath.slice(-1) === '/'
 }
 
 // Strip fragment for URI (removes everything from first '#')
@@ -93,7 +97,20 @@ Cache.prototype = {
 /*
  * Adapted from node-solid-server/lib/metadata.js
  */
-function Metadata () {
+
+class  LdpMetadata {
+  constructor() {
+    this.filename = ''
+    this.isResource = false
+    this.isSourceResource = false
+    this.isContainer = false
+    this.isBasicContainer = false
+    this.isDirectContainer = false
+  }
+}
+
+
+function ldpMetadata () {
   this.filename = ''
   this.isResource = false
   this.isSourceResource = false
@@ -193,6 +210,7 @@ module.exports.path = path
  * Local helpers
  */
 module.exports.isFolder = isFolder
+module.exports.isNfsFolder = isNfsFolder
 module.exports.docpart = docpart
 module.exports.itemPathPart = itemPathPart
 module.exports.hostpart = hostpart
@@ -202,7 +220,7 @@ module.exports.parentPathNoDot = parentPathNoDot
 module.exports.Cache = Cache
 
 // Adapted/copied from node-solid-server
-module.exports.Metadata = Metadata
+module.exports.LdpMetadata = LdpMetadata
 module.exports.addLink = addLink
 module.exports.addLinks = addLinks
 

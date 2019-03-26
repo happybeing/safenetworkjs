@@ -443,6 +443,7 @@ const SN_SERVICEID_LDP = 'www'  // First try 'www' to test compat with other app
 
 /* eslint-disable no-unused-vars */
 const isFolder = safeUtils.isFolder
+const isNfsFolder = safeUtils.isNfsFolder
 const docpart = safeUtils.docpart
 const itemPathPart = safeUtils.itemPathPart
 const hostpart = safeUtils.hostpart
@@ -450,7 +451,6 @@ const protocol = safeUtils.protocol
 const parentPathNoDot = safeUtils.parentPathNoDot
 const addLink = safeUtils.addLink
 const addLinks = safeUtils.addLinks
-const Metadata = safeUtils.Metadata
 // TODO change my code and these utils to use these npm libs:
 const S = safeUtils.string
 const path = safeUtils.path
@@ -536,7 +536,17 @@ class SafenetworkApi {
     // - index-web.js (Browser app)
     debug( 'this.safeApi is %o: ', this.safeApi)
 
-    this.safeUtils = safeUtils  // Access to utilities
+    /*
+    * Access to helpers and constants via the object (useful when <script> including this JS)
+    */
+    this.safeUtils = safeUtils  // Access to all utilities
+    this.isCacheableResult = isCacheableResult
+    this.isFolder = isFolder
+    this.docpart = docpart
+    this.itemPathPart = itemPathPart
+    this.hostpart = hostpart
+    this.protocol = protocol
+    this.parentPathNoDot = parentPathNoDot
 
     this._availableServices = new Map() // Map of installed services
     this.initialise()
@@ -593,12 +603,6 @@ class SafenetworkApi {
 
     this.isCacheableResult = isCacheableResult
     this.safeUtils = safeUtils
-    this.isFolder = safeUtils.isFolder
-    this.docpart = safeUtils.docpart
-    this.itemPathPart = safeUtils.itemPathPart
-    this.hostpart = safeUtils.hostpart
-    this.protocol = safeUtils.protocol
-    this.parentPathNoDot = safeUtils.parentPathNoDot
 
     // Constants
     this.ERRORS = SafenetworkJsErrors
@@ -834,7 +838,7 @@ class SafenetworkApi {
    * @return {String} full document path (without a leading '/')
    */
   nfsPathPart (docUri) {
-    let pathPart = this.itemPathPart(docUri)
+    let pathPart = itemPathPart(docUri)
     if (pathPart[0] === '/') {
       pathPart = pathPart.slice(1)  // safeNfs entries don't allow a leading '/'
     }
@@ -1259,7 +1263,7 @@ class SafenetworkApi {
         let parent              // URI based NFS container has no parent
         container = new NfsContainer(this, service.getServiceValue(), containerPath, parent, false)
         await container.initialise()
-        container._subTree = safeUtils.itemPathPart(safeUri)  // Optionally mounts a subdirectory of the NFS container
+        container._subTree = itemPathPart(safeUri)  // Optionally mounts a subdirectory of the NFS container
       } else {
         throw new Error('failed to get ServiceInterface for %s', safeUri)
       }
@@ -1339,6 +1343,11 @@ class SafenetworkApi {
     try {
       let useKey = await mData.encryptKey(key)
       valueVersion = await mData.get(useKey)
+      if (!valueVersion) {
+        const e = new Error('MutableData.get() returned undefined')
+        e.code = CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY
+        throw e
+      }
       valueVersion.buf = await mData.decrypt(valueVersion.buf)
       return valueVersion
     } catch (err) {
@@ -2143,7 +2152,7 @@ class SafenetworkApi {
         response = await this.safeApp.webFetch(docUri, options)
       } catch (err) {
         logApi('%s._fetch() error: %s', this.constructor.name, err)
-        response = new Response(null, {status: 404, statusText: '404 Not Found'})
+        response = new Response(null, {status: 404, statusText: 'Not Found'})
       }
     }
 
@@ -2338,7 +2347,7 @@ class ServiceInterface {
     // Default handler when service does not provide one
     logApi('WARNING: \'%s\' not implemented for %s service (returning 405)', method, this.getName())
     return async function () {
-      return new Response(null, {ok: false, status: 405, statusText: '405 Method Not Allowed'})
+      return new Response(null, {ok: false, status: 405, statusText: 'Method Not Allowed'})
     }
   }
 
@@ -2496,9 +2505,12 @@ class SafeServiceWww extends ServiceInterface {
 const mime = require('mime-types')
 const $rdf = require('rdflib')
 const ns = require('solid-namespace')($rdf)
+const LdpMetadata = require('./safenetwork-utils').LdpMetadata
+var { extensions } = require('mime-types')
+var LinkHeader = require( 'http-link-header' )
 
+// TODO move LDP stuff from here and safenetwork-utils.js to safenetwork-ldp.js
 // TODO update to use SafeNfsContainer instead of calling SAFE NFS APIs
-
 class SafeServiceLDP extends ServiceInterface {
   constructor (safeJs) {
     super(safeJs)
@@ -2701,7 +2713,7 @@ class SafeServiceLDP extends ServiceInterface {
     logLdp('WARNING: SafenetworkLDP::_fetch() may need to return empty listing for non-existant containers')
     return response;
     */
-    if (isFolder(docUri)) {
+    if (isNfsFolder(docUri)) {
       return this._getFolder(docUri, options)
     } else {
       return this._getFile(docUri, options)
@@ -2712,7 +2724,7 @@ class SafeServiceLDP extends ServiceInterface {
   //
   // See node-solid-server/lib/header.js linksHandler()
   async addHeaderLinks (docUri, options, headers) {
-    let fileMetadata = new Metadata()
+    let fileMetadata = new LdpMetadata()
     if (S(docUri).endsWith('/')) {
       fileMetadata.isContainer = true
       fileMetadata.isBasicContainer = true
@@ -2736,7 +2748,7 @@ class SafeServiceLDP extends ServiceInterface {
     let contentType = options.contentType
 
     // TODO Refactor to get rid of putDone...
-    const putDone = async (docUri, opotions, response) => {
+    const putDone = async (docUri, options, response) => {
       try {
         // mrhTODO response.status checks for versions are untested
         logLdp('%s.put putDone(status: ' + response.status + ') for path: %s', this.constructor.name, docUri)
@@ -2781,11 +2793,61 @@ class SafeServiceLDP extends ServiceInterface {
     }
   }
 
+  parseMetadataFromHeader (options) {
+    let headers = options.headers
+    var fileMetadata = new LdpMetadata()
+    if (!headers || !headers.link) {
+      options.metadata = { 'fileMetadata': fileMetadata }
+    } else {
+      // See also node-solid-server/src/handlers/post.js one() etc
+      fileMetadata.mimeType = headers.contentType ? headers.contentType.replace(/\s*;.*/, '') : ''
+      fileMetadata.extension = fileMetadata.mimeType in extensions ? `.${extensions[mimeType][0]}` : ''
+      let links = LinkHeader.parse(headers.link)
+      logLdp('links: %O', links)
+      let rels = links.rel('type')
+
+      for (var rel in rels) {
+        switch (rels[rel].uri) {
+          case 'http://www.w3.org/ns/ldp#Resource':
+          fileMetadata.isResource = true
+          break
+          case 'http://www.w3.org/ns/ldp#RDFSource':
+            fileMetadata.isSourceResource = true
+          break
+          case 'http://www.w3.org/ns/ldp#Container':
+            fileMetadata.isContainer = true
+          break
+          case 'http://www.w3.org/ns/ldp#BasicContainer':
+            fileMetadata.isBasicContainer = true
+          break
+          case 'http://www.w3.org/ns/ldp#DirectContainer':
+            fileMetadata.isDirectContainer = true
+          default:
+        }
+      }
+      options.metadata = { 'links': links, 'fileMetadata': fileMetadata }
+    }
+
+    return options
+  }
+
   // TODO specialise put/post (RemoteStorage service just has put - so leave til imp RS service)
   async post (docUri, options) {
-    logLdp('%s.post(%s,%O)', this.constructor.name, docUri, options)
+    logLdp('%s.post(%s, %O)', this.constructor.name, docUri, options)
 
-    if (isFolder(docUri)) {
+    options = this.parseMetadataFromHeader(options)
+    const fileMetadata = options.metadata.fileMetadata
+    if (fileMetadata.isContainer && docUri.slice(-1) !== '/') {
+      docUri += '/'
+    } else if (options.headers.slug){
+      let slug = decodeURIComponent(options.headers.slug)
+      if (slug.match(/\/|\||:/)) {
+        return new Response(null, {ok: false, status: 400, statusText: 'The name of new file POSTed may not contain : | or /'})
+      }
+      docUri = docUri + (docUri.slice(-1) === '/' ? '' : '/') + slug
+    }
+
+    if (fileMetadata.isContainer) {
       return this._fakeCreateContainer(docUri, options)
     }
 
@@ -2797,9 +2859,9 @@ class SafeServiceLDP extends ServiceInterface {
     let docPath = this.safeJs.nfsPathPart(docUri)
 
     try {
-      let fileInfo = await this._getFileInfo(itemPathPart(docUri))
+      let fileInfo = await this._getFileInfo(docPath)
       if (!fileInfo) {
-        return new Response(null, {status: 404, statusText: '404 Not Found'})
+        return new Response(null, {status: 404, statusText: 'Not Found'})
       }
 
       var etagWithoutQuotes = (typeof (fileInfo.ETag) === 'string' ? fileInfo.ETag : undefined)
@@ -2807,11 +2869,11 @@ class SafeServiceLDP extends ServiceInterface {
         return new Response(null, {status: 412, revision: etagWithoutQuotes})
       }
 
-      if (isFolder(docUri)) {
+      if (isNfsFolder(docUri)) {
         return this._fakeDeleteContainer(docUri, options)
       }
 
-      if (!isFolder(docPath)) {
+      if (!isNfsFolder(docPath)) {
         logLdp('safeNfs.delete() param this.storageNfs(): ' + await this.storageNfs())
         logLdp('                 param path: ' + docPath)
         logLdp('                 param version: ' + fileInfo.version)
@@ -2819,12 +2881,12 @@ class SafeServiceLDP extends ServiceInterface {
         let perms // if auth is needed, request default permissions
         await safeJs.nfsMutate(await this.storageNfs(), perms, 'delete', docPath, undefined, fileInfo.version + 1)
 //        await (await this.storageNfs()).delete(docPath, fileInfo.version + 1)
-        this._fileInfoCache.delete(docUri)
-        return new Response(null, {status: 204, statusText: '204 No Content'})
+        this._deleteFileInfo(docPath)
+        return new Response(null, {status: 204, statusText: 'No Content'})
       }
     } catch (err) {
       logLdp('%s.delete() failed: %s', this.constructor.name, err)
-      this._fileInfoCache.delete(docUri)
+      this._deleteFileInfo(docPath)
       return this.safeJs._httpResponseError('DELETE', err)
     }
   }
@@ -2836,14 +2898,14 @@ class SafeServiceLDP extends ServiceInterface {
   // TODO review container emulation (create,delete,get)
   async _fakeCreateContainer (path, options) {
     logLdp('fakeCreateContainer(%s,{%o})...')
-    return new Response(null, {ok: true, status: 201, statusText: '201 Created'})
+    return new Response(null, {ok: true, status: 201, statusText: 'Created'})
   }
 
   // TODO this should error if the container is not empty, so check this
   // TODO (check Solid and/or LDP spec)
   async _fakeDeleteContainer (path, options) {
     logLdp('fakeDeleteContainer(%s,{%o})...')
-    return new Response(null, {status: 204, statusText: '204 No Content'})
+    return new Response(null, {status: 204, statusText: 'No Content'})
   }
 
   // TODO the remaining helpers should probably be re-written just for LDP because
@@ -2871,11 +2933,11 @@ class SafeServiceLDP extends ServiceInterface {
 
       var etagWithoutQuotes = (typeof (fileInfo.ETag) === 'string' ? fileInfo.ETag : undefined)
       if (options && options.ifMatch && (options.ifMatch !== etagWithoutQuotes)) {
-        return new Response(null, {status: 412, statusText: '412 Precondition Failed', revision: etagWithoutQuotes})
+        return new Response(null, {status: 412, statusText: 'Precondition Failed', revision: etagWithoutQuotes})
       }
 
       // Only act on files (directories are inferred so no need to create)
-      if (isFolder(docUri)) {
+      if (isNfsFolder(docUri)) {
         // Strictly we shouldn't get here as the caller should test, but in case we do
         logLdp('WARNING: attempt to update a folder')
       } else {
@@ -2883,7 +2945,9 @@ class SafeServiceLDP extends ServiceInterface {
         let nfsFile = await (await this.storageNfs()).create(body)
 
         // Add file to directory (by inserting nfsFile into container)
-        nfsFile = await (await this.storageNfs()).update(docPath, nfsFile, fileInfo.containerVersion + 1)
+        // nfsFile = await (await this.storageNfs()).update(docPath, nfsFile, fileInfo.containerVersion + 1)
+        let perms // if auth is needed, request default permissions
+        await safeJs.nfsMutate(await this.storageNfs(), perms, 'update', docPath, nfsFile, fileInfo.version + 1)
         await this._updateFileInfo(nfsFile, docPath)
 
         // TODO implement LDP PUT response https://www.w3.org/TR/ldp-primer/
@@ -2912,8 +2976,16 @@ class SafeServiceLDP extends ServiceInterface {
       // mrhTODOx set file metadata (contentType) - how?
 
       // Add file to directory (by inserting nfsFile into container)
+
+      // TODO delete comments
       // logLdp('DEBUG:  this.storageNfs().insert(nfsFile,%s)...',docPath)
-      nfsFile = await (await this.storageNfs()).insert(docPath, nfsFile)
+      // nfsFile = await (await this.storageNfs()).insert(docPath, nfsFile)
+      const valueVersion = await safeJs.getMutableDataValueVersion(await this.storageMd(), docPath)
+      const version = valueVersion ? valueVersion.version : 0
+      const operation = valueVersion ? 'update' : 'insert'
+
+      let perms // if auth is needed, request default permissions
+      await safeJs.nfsMutate(await this.storageNfs(), perms, operation, docPath, nfsFile, version + 1)
 
       // logLdp('DEBUG:  this._updateFileInfo(...)...')
       this._updateFileInfo(nfsFile, docPath)
@@ -2957,7 +3029,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('fetched nfsFile: %o', nfsFile)
         fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
       } catch (err) {
-        return new Response(null, {status: 404, statusText: '404 File not found'})
+        return new Response(null, {status: 404, statusText: 'File not found'})
       }
       fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
       logLdp('safeNfs.open() returns handle: %o', fileInfo.openHandle)
@@ -2965,7 +3037,7 @@ class SafeServiceLDP extends ServiceInterface {
       var etagWithoutQuotes = fileInfo.ETag
       // Request is for changed file, so if eTag matches return "304 Not Modified"
       if (options && options.ifNoneMatch && etagWithoutQuotes && (etagWithoutQuotes === options.ifNoneMatch)) {
-        return new Response(null, {status: 304, statusText: '304 Not Modified'})
+        return new Response(null, {status: 304, statusText: 'Not Modified'})
       }
 
       var contentType = mime.lookup(docPath) || this.DEFAULT_CONTENT_TYPE
@@ -3051,14 +3123,14 @@ class SafeServiceLDP extends ServiceInterface {
     let response
 
     // TODO delete this
-    const containerPrefixes = {
-      posts: '',
-      ldp: 'http://www.w3.org/ns/ldp#',
-      terms: 'http://purl.org/dc/terms/',
-      XML: 'http://www.w3.org/2001/XMLSchema#',
-      st: 'http://www.w3.org/ns/posix/stat#',
-      tur: 'http://www.w3.org/ns/iana/media-types/text/turtle#'
-    }
+    // const containerPrefixes = {
+    //   posts: '',
+    //   ldp: 'http://www.w3.org/ns/ldp#',
+    //   terms: 'http://purl.org/dc/terms/',
+    //   XML: 'http://www.w3.org/2001/XMLSchema#',
+    //   st: 'http://www.w3.org/ns/posix/stat#',
+    //   tur: 'http://www.w3.org/ns/iana/media-types/text/turtle#'
+    // }
 
     var listing = {} // TODO listing output - to be removed now o/p is via an RDF graph
     //    var rdfGraph = N3.Writer({ prefixes: containerPrefixes })
@@ -3132,7 +3204,7 @@ class SafeServiceLDP extends ServiceInterface {
       // TODO review error handling and responses
       logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
       // TODO are their any SAFE API codes we need to detect?
-      return new Response(null, {status: 404, statusText: '404 Resource Not Found'})
+      return new Response(null, {status: 404, statusText: 'Resource Not Found'})
     })
 
     logLdp('Iteration finished')
@@ -3163,7 +3235,7 @@ class SafeServiceLDP extends ServiceInterface {
       // TODO review error handling and responses
       logLdp('safeNfs.getEntries(\'%s\') failed: %s', docUri, err)
       // TODO are their any SAFE API codes we need to detect?
-      return new Response(null, {status: 404, statusText: '404 Resource Not Found'})
+      return new Response(null, {status: 404, statusText: 'Resource Not Found'})
     }
 
     return response
@@ -3190,7 +3262,7 @@ class SafeServiceLDP extends ServiceInterface {
 
   // get LDP metadata for an LDPC container or LDPR/LDP-NR file
   //
-  // @returns a Promise which resolves to an ldpMetadata
+  // @returns a Promise which resolves to an LdpMetadata
   //
   //  Note: to avoid having to parse large files, node-solid-server
   //  stores file metadata in a .meta file.
@@ -3244,7 +3316,7 @@ class SafeServiceLDP extends ServiceInterface {
             typeStatement.object.uri !== ns.ldp('BasicContainer').uri &&
             typeStatement.object.uri !== ns.ldp('Container').uri
           ) ||
-          isFolder(docUri)
+          isNfsFolder(docUri)
         ) {
           resourceGraph.add(resourceGraph.sym(docUri),
           typeStatement.predicate,
@@ -3365,13 +3437,16 @@ class SafeServiceLDP extends ServiceInterface {
     logLdp('%s._getFileInfo(%s)', this.constructor.name, docPath)
     try {
       if (refreshCache) {
-        this._fileInfoCache.delete(docPath)
+        this._deleteFileInfo(docPath)
       }
 
       let fileInfo
       if (docPath !== '/') {
         fileInfo = await this._fileInfoCache.get(docPath)
-        if (fileInfo) { return fileInfo }
+        if (fileInfo) {
+          logLdp('returning cached fileInfo: %O', fileInfo)
+          return fileInfo
+        }
       }
       // Not yet cached or doesn't exist
 
@@ -3379,16 +3454,19 @@ class SafeServiceLDP extends ServiceInterface {
       let smd = await this.storageMd()
       let containerVersion = await smd.getVersion()
       if (docPath === '/') {
-        return { path: docPath, ETag: containerVersion.toString() }
+        var folderInfo = { path: docPath, ETag: containerVersion.toString() }
+        logLdp('returning folderInfo: %O', folderInfo)
+        return folderInfo
       } // Dummy fileInfo to stop at "root"
 
-      if (isFolder(docPath)) {
+      if (isNfsFolder(docPath)) {
         // TODO Could use _getFolder() in order to generate Solid metadata
         var folderInfo = {
           docPath: docPath, // Used by _fileInfoCache() but nothing else
           'containerVersion': containerVersion
         }
         this._fileInfoCache.set(docPath, folderInfo)
+        logLdp('returning folderInfo: %O', folderInfo)
         return folderInfo
       }
 
@@ -3411,6 +3489,7 @@ class SafeServiceLDP extends ServiceInterface {
       if (fileInfo) {
         this._fileInfoCache.set(docPath, fileInfo)
 
+        logLdp('returning fileInfo: %O', fileInfo)
         return fileInfo
       } else {
         // file, doesn't exist
@@ -3422,12 +3501,20 @@ class SafeServiceLDP extends ServiceInterface {
       throw err
     }
   }
+
+  async _deleteFileInfo (docPath) {
+    if (docPath[0] !== '/') {
+      docPath = '/' + docPath
+    }
+    this._fileInfoCache.delete(docPath)
+  }
 }
 
 // Usage: create the web API and install the built in services
 // let safeJs = new SafenetworkApi()
 
 module.exports.SafenetworkApi = SafenetworkApi
+module.exports.safeUtils = safeUtils
 
 /*
  *  Override window.fetch() in order to support safe:// URIs
