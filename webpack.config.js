@@ -16,14 +16,19 @@ module.exports = {
     optimizationBailout: true
   },
 
-module: {
-  rules: [
-    {
-      test: /\.js$/,
-      exclude: /node_modules/
-    }
-  ],
-},
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        exclude: /node_modules/
+      }
+    ],
+  },
+  externals: {
+    'node-fetch': 'fetch',
+    'solid-auth-cli': 'null',
+    'fs': 'null-fs'
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'safenetworkjs.js',
