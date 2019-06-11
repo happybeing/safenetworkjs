@@ -549,6 +549,11 @@ class SafenetworkApi {
     this.parentPathNoDot = parentPathNoDot
 
     this._availableServices = new Map() // Map of installed services
+
+    // _isConnected must be initialised here or setSafeAppHandle() will
+    // reset it after _networkStateCallback has set it 'true' during
+    // initAuthorised() / initUnauthorised()
+    this._isConnected = undefined
     this.initialise()
     this.initialiseServices()
   }
@@ -562,7 +567,6 @@ class SafenetworkApi {
 
     // SAFE API settings and and authorisation status
     this._safeAuthUri = ''
-    this._isConnected = false
     this._isAuthorised = false
     this._authOnAccessDenied = false  // Used by initAuthorised() and fetch()
 
@@ -871,7 +875,11 @@ class SafenetworkApi {
       this.immutableData = this._appHandle.immutableData
       this.mutableData = this._appHandle.mutableData
       this.webFetch = this._appHandle.webFetch
-      try { this.initTests() } catch (e) { debug(e) }
+
+      this._isAuthorised = true
+
+      // Can't do this unless I make setSafeAppHandle() async
+      // try { await this.initTests() } catch (e) { debug(e) }
     }
   }
 
@@ -899,7 +907,7 @@ class SafenetworkApi {
   // For access to SAFE API:
   appHandle () { return this._appHandle }
   getAuthUri () { return this._safeAuthUri } // TODO ensure auth URI comes from bootstrap
-  isConnected () { return this._isConnected }
+  isConnected () { return this._isConnected === 'Connected' } // See issue https://github.com/maidsafe/safe_app_nodejs/issues/373
   isAuthorised () { return this._isAuthorised }
   services () { return this._availableServices }  // Note: these are ServiceInterface rather than ServiceContainer
 
@@ -965,43 +973,43 @@ class SafenetworkApi {
     return this.setSafeAppHandle(await this.safeApi.initUnauthorised(appInfo, appOptions, this._networkStateCallback, argv))
   }
 
-  // TODO - DEPRECATED
-  async initReadOnly (appInfo = untrustedAppInfo) {
-    // TODO review/update
-    logApi('%s.initReadOnly(%O) is DEPRECATED, use initUnauthorised() instead', this.constructor.name, appInfo)
-
-    let tmpAppHandle
-    try {
-      tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
-        // Callback for network state changes
-        logApi('SafeNetwork state changed to: ', newState)
-        this._isConnected = newState // TODO bugchase
-      })
-
-      logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-      this.setSafeAppHandle(tmpAppHandle)
-      this._safeAppInfo = appInfo
-      this._safeAppContainers = undefined
-      if (window) {
-        let connUri = await this.auth.genConnUri()
-        logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-
-        this._safeAuthUri = await this.safeApi.authorise(connUri)
-        logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-
-        await this.auth.loginFromUri(this._safeAuthUri)
-        this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-      } else {
-        logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-        this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-      }
-      return this._appHandle
-    } catch (err) {
-      logApi('WARNING: ', err)
-      this.setSafeAppHandle(null)
-      throw (err)
-    }
-  }
+  // TODO - DELETE
+  // async initReadOnly (appInfo = untrustedAppInfo) {
+  //   // TODO review/update
+  //   logApi('%s.initReadOnly(%O) is DEPRECATED, use initUnauthorised() instead', this.constructor.name, appInfo)
+  //
+  //   let tmpAppHandle
+  //   try {
+  //     tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
+  //       // Callback for network state changes
+  //       logApi('SafeNetwork state changed to: ', newState)
+  //       this._isConnected = newState // TODO bugchase
+  //     })
+  //
+  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
+  //     this.setSafeAppHandle(tmpAppHandle)
+  //     this._safeAppInfo = appInfo
+  //     this._safeAppContainers = undefined
+  //     if (window) {
+  //       let connUri = await this.auth.genConnUri()
+  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+  //
+  //       this._safeAuthUri = await this.safeApi.authorise(connUri)
+  //       logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
+  //
+  //       await this.auth.loginFromUri(this._safeAuthUri)
+  //       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+  //     } else {
+  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
+  //       this._isConnected = 'Connected' // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+  //     }
+  //     return this._appHandle
+  //   } catch (err) {
+  //     logApi('WARNING: ', err)
+  //     this.setSafeAppHandle(null)
+  //     throw (err)
+  //   }
+  // }
 
   /**
    * Initialise SafenetworkApi and authorised connection to SAFE Network
@@ -1026,51 +1034,51 @@ class SafenetworkApi {
     return this.setSafeAppHandle(await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv))
   }
 
-  // TODO - DEPRECATED
-  async simpleAuthorise (appInfo, appContainers) {
-    logApi('%s.simpleAuthorise(%O,%O) is DEPRECATED, use initAuthorised() instead', this.constructor.name, appInfo, appContainers)
-
-    // TODO ??? not sure what I'm thinking here...
-    // TODO probably best to have initialise called once at start so can
-    // TODO access the API with or without authorisation. So: remove the
-    // TODO initialise call to a separate point and only call it once on
-    // TODO load. Need to change freeSafeAPI() or not call it above.
-    //
-    // TODO I think once I have this._safeAuthUri I should be able
-    // TODO to just try auth.loginFromUri() with that to skip the UI prompts
-
-    this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
-
-    let tmpAppHandle
-    try {
-      tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
-        // Callback for network state changes
-        logApi('SafeNetwork state changed to: ', newState)
-        this._isConnected = newState // TODO bugchase
-      })
-
-      logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-      this.setSafeAppHandle(tmpAppHandle)
-      this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-      this._safeAppInfo = appInfo
-      this._safeAppContainers = (appContainers !== undefined ? appContainers : defaultAppContainers)
-
-      // await this.testsNoAuth();  // TODO remove (for test only)
-      let authReqUri = await this.auth.genAuthUri(this._safeAppContainers, this._safeAppInfo.options)
-      this._safeAuthUri = await this.safeApi.authorise(authReqUri)
-      logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-
-      await this.auth.loginFromUri(this._safeAuthUri)
-      logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
-      await this.testsAfterAuth()  // TODO remove (for test only)
-      this._isAuthorised = true
-      return this._appHandle
-    } catch (err) {
-      logApi('WARNING: ', err)
-      this.setSafeAppHandle(null)
-      throw (err)
-    }
-  }
+  // TODO - DELETE
+  // async simpleAuthorise (appInfo, appContainers) {
+  //   logApi('%s.simpleAuthorise(%O,%O) is DEPRECATED, use initAuthorised() instead', this.constructor.name, appInfo, appContainers)
+  //
+  //   // TODO ??? not sure what I'm thinking here...
+  //   // TODO probably best to have initialise called once at start so can
+  //   // TODO access the API with or without authorisation. So: remove the
+  //   // TODO initialise call to a separate point and only call it once on
+  //   // TODO load. Need to change freeSafeAPI() or not call it above.
+  //   //
+  //   // TODO I think once I have this._safeAuthUri I should be able
+  //   // TODO to just try auth.loginFromUri() with that to skip the UI prompts
+  //
+  //   this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
+  //
+  //   let tmpAppHandle
+  //   try {
+  //     tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
+  //       // Callback for network state changes
+  //       logApi('SafeNetwork state changed to: ', newState)
+  //       this._isConnected = newState // TODO bugchase
+  //     })
+  //
+  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
+  //     this.setSafeAppHandle(tmpAppHandle)
+  //     this._isConnected = 'Connected' // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
+  //     this._safeAppInfo = appInfo
+  //     this._safeAppContainers = (appContainers !== undefined ? appContainers : defaultAppContainers)
+  //
+  //     // await this.testsNoAuth();  // TODO remove (for test only)
+  //     let authReqUri = await this.auth.genAuthUri(this._safeAppContainers, this._safeAppInfo.options)
+  //     this._safeAuthUri = await this.safeApi.authorise(authReqUri)
+  //     logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
+  //
+  //     await this.auth.loginFromUri(this._safeAuthUri)
+  //     logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
+  //     await this.testsAfterAuth()  // TODO remove (for test only)
+  //     this._isAuthorised = true
+  //     return this._appHandle
+  //   } catch (err) {
+  //     logApi('WARNING: ', err)
+  //     this.setSafeAppHandle(null)
+  //     throw (err)
+  //   }
+  // }
 
   /* --------------------------
    * Mutable Data Helpers
@@ -3164,7 +3172,7 @@ class SafeServiceLDP extends ServiceInterface {
           logLdp('entryVersion: ', entry.value.version)
 
           var dirPath = docPath
-          if (dirPath.slice(-1) !== '/') { dirPath += '/' } // Ensure a trailing slash
+          if (dirPath.length && dirPath.slice(-1) !== '/') { dirPath += '/' } // Ensure a trailing slash
 
           var key = entry.key.toString()
           // If the folder matches the start of the key, the key is within the folder
@@ -3396,6 +3404,17 @@ class SafeServiceLDP extends ServiceInterface {
     ns.dct('modified'),
     fileInfo.modified) // An actual datetime value from a Date object
 
+    if (fileInfo.isFolder) {
+      resourceGraph.add(
+        resourceGraph.sym(reqUri),
+        ns.rdf('type'),
+        ns.ldp('BasicContainer'))
+      resourceGraph.add(
+        resourceGraph.sym(reqUri),
+        ns.rdf('type'),
+        ns.ldp('Container'))
+    }
+
     if (mime.lookup(reqUri)) { // Is the file has a well-known type,
       let type = 'http://www.w3.org/ns/iana/media-types/' + mime.lookup(reqUri) + '#Resource'
       resourceGraph.add(resourceGraph.sym(reqUri),
@@ -3451,20 +3470,26 @@ class SafeServiceLDP extends ServiceInterface {
       // Not yet cached or doesn't exist
 
       // Folders //
+
+      // Default folderInfo:
+      var folderInfo = {
+        path:     docPath,
+        docPath:  docPath,// Used by _fileInfoCache() but nothing else
+        isFolder: true,
+        modified: Date.now(),    // TODO implement metadata (modified) on SAFE container
+        size: 0           // TODO implement metadata (size) on SAFE container
+      }
       let smd = await this.storageMd()
       let containerVersion = await smd.getVersion()
       if (docPath === '/') {
-        var folderInfo = { path: docPath, ETag: containerVersion.toString() }
+        folderInfo.ETag = containerVersion.toString()
         logLdp('returning folderInfo: %O', folderInfo)
         return folderInfo
       } // Dummy fileInfo to stop at "root"
 
       if (isNfsFolder(docPath)) {
         // TODO Could use _getFolder() in order to generate Solid metadata
-        var folderInfo = {
-          docPath: docPath, // Used by _fileInfoCache() but nothing else
-          'containerVersion': containerVersion
-        }
+        folderInfo.containerVersion = containerVersion
         this._fileInfoCache.set(docPath, folderInfo)
         logLdp('returning folderInfo: %O', folderInfo)
         return folderInfo
@@ -3478,6 +3503,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('_getFileInfo() - fetched nfsFile: %s', nfsFile.toString())
         fileInfo = await this._makeFileInfo(nfsFile, {}, docPath)
         fileInfo.containerVersion = containerVersion
+        fileInfo.isFolder = false
       } catch (err) {
         fileInfo = null
       }
@@ -3515,21 +3541,3 @@ class SafeServiceLDP extends ServiceInterface {
 
 module.exports.SafenetworkApi = SafenetworkApi
 module.exports.safeUtils = safeUtils
-
-/*
- *  Override window.fetch() in order to support safe:// URIs
- */
-
-// Protocol handlers for fetch()
-const httpFetch = require('isomorphic-fetch')
-const protoFetch = require('proto-fetch')
-
-// map protocols to fetch()
-const fetch = protoFetch({
-  http: httpFetch,
-  https: httpFetch
-//  safe: safeJs.fetch.bind(safeJs)
-//  https: Safenetwork.fetch.bind(Safenetwork), // Debugging with SAFE mock browser
-})
-
-module.exports.protoFetch = fetch
