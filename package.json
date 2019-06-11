@@ -5,20 +5,27 @@
   "author": "theWebalyst",
   "license": "GPL-3.0",
   "main": "src/index.js",
+  "browser": "src/index-web.js",
+  "engines": {
+    "node": ">=8.15.0"
+  },
   "scripts": {
     "test": "echo No tests yet!",
     "doc": "jsdoc src -r -d docs || true",
     "build": "webpack --mode production --verbose --colors --config webpack.config.js",
+    "builddev": "webpack --mode development --verbose --colors --config webpack.config.js",
+    "builddevsac": "webpack --mode development --verbose --colors --config webpack.config.js && cp -v ./dist/* ~/src/solid/solid-auth-client/src && cp -v ./dist/* ~/src/solid/solid-plume-sac/js/ && cp -v ./dist/* ~/src/solid/solid-auth-client-test/src",
     "dev": "webpack --watch --mode development --verbose --colors --config webpack.config.js",
-    "buildsac": "webpack --mode production --verbose --colors --config webpack.config.js && cp ./dist/* ~/src/solid/solid-auth-client/src"
+    "buildsac": "webpack --mode production --verbose --colors --config webpack.config.js && cp -v ./dist/* ~/src/solid/solid-auth-client/src && cp -v ./dist/* ~/src/solid/solid-plume-sac/js/ && cp -v ./dist/* ~/src/solid/solid-auth-client-test/src"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/thewebalyst/safenetworkjs.git"
   },
   "dependencies": {
-    "@maidsafe/safe-node-app": "^0.10.3",
+    "@maidsafe/safe-node-app": "^0.11.1",
     "debug": "^4.1.1",
+    "detect-node": "^2.0.4",
     "fast-text-encoding": "^1.0.0",
     "http-link-header": "^1.0.2",
     "isomorphic-fetch": "^2.2.1",
@@ -26,7 +33,7 @@
     "node-ipc": "^9.1.1",
     "path": "^0.12.7",
     "proto-fetch": "^1.0.0",
-    "rdflib": "^0.19.1",
+    "rdflib": "^0.20.1",
     "solid-namespace": "^0.2.0",
     "string": "^3.3.3"
   },
