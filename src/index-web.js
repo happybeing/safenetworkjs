@@ -6,7 +6,9 @@ if (typeof window === 'undefined') {
 }
 
 if (typeof window.safe === 'undefined') {
-  console.log('WARNING: window.safe (SAFE Network API) is not defined, are you running in SAFE Browser?')
+  let errMsg = 'WARNING: window.safe (SAFE Network API) is not defined, are you running in SAFE Browser?'
+  console.log(errMsg)
+  throw new Error(errMsg)
 }
 
 // SafenetworkJs library
