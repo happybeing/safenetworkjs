@@ -11,14 +11,13 @@ if (typeof window.safe === 'undefined') {
   throw new Error(errMsg)
 }
 
-// SafenetworkJs library
+// SafenetworkJs libraries
 const Safenetworkjs = require('./safenetwork-api')
 
 // SafenetworkApi instance with SAFE Client Libs API
-const safeJs = new Safenetworkjs.SafenetworkApi
+const safeApi = require('./bootstrap-web')
+const safeJs = new Safenetworkjs.SafenetworkApi(safeApi)
 window.safeJs = safeJs
-
-safeJs.safeApi = require('./bootstrap-web')
 
 /*
  *  Override window.fetch() in order to support safe:// URIs
@@ -42,3 +41,4 @@ module.exports.SafenetworkApi = Safenetworkjs.SafenetworkApi
 
 module.exports.safeJs = safeJs
 module.exports.protoFetch = protoFetch
+module.exports.WebIdProfile = require('./webid_profile')
