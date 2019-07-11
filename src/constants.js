@@ -27,6 +27,11 @@ const CONSTANTS = {
 
   MD_METADATA_KEY: '_metadata',
 
+  DATA_TYPE_MD:   'MD',
+  DATA_TYPE_IMMD: 'IMMD',
+  DATA_TYPE_NFS:  'NFS',
+  DATA_TYPE_RDF:  'RDF',
+
   ENV: {
     DEV: 'development',
     TEST: 'test',
@@ -34,7 +39,9 @@ const CONSTANTS = {
   },
   TYPE_TAG: {
     DNS: 15001,
-    WWW: 15002
+    WWW: 15002,
+    NFS: 15002,
+    WEBID: 16048  // From maidsafe/safe-web-id-manager-js-fork/src/actions/webIds_actions.js
   },
   ERROR_CODE: {
     ENCODE_DECODE_ERROR: -1,
