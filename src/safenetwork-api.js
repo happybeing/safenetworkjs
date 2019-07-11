@@ -391,6 +391,7 @@ Features generic JSON i/f for:
 
 
 require('fast-text-encoding') // TextEncoder, TextDecoder (for desktop apps)
+const { parse: parseUrl } = require('url');
 
 const SUCCESS = null
 
@@ -415,8 +416,12 @@ let extraDebug = false
 /**
  * SafenetworkJs constants, including ones not exposed by safeApi.CONSTANTS
  */
+// TODO this is a mish mash because SAFE API exposes few constants & errors
 
-const CONSTANTS = require('./constants')
+const CONSTANTS = require('./constants')    // Augmented copy from Web Hosting Manager
+
+const consts = require('./consts')          // Copy of safe_app_nodejs/src/consts.js
+const errConst = require('./error_const')   // Copy of safe_app_nodejs/src/error_const.js
 
 /**
  * SafenetworkJs error codes (assigned to Error.code)
@@ -527,14 +532,15 @@ const defaultAppContainers = {
 
 class SafenetworkApi {
 
-  constructor () {
-    logApi('SafenetworkApi()')
+  constructor (safeApi) {
+    logApi('SafenetworkApi(%o)', safeApi)
+    this.safeApi = safeApi
 
     // Access to SAFE API (DOM or NodeJS)
     // Must be set by either:
     // - index.js (nodejs app), or
     // - index-web.js (Browser app)
-    debug( 'this.safeApi is %o: ', this.safeApi)
+    if (!safeApi) debug( 'WARNING safeApi is not valid')
 
     /*
     * Access to helpers and constants via the object (useful when <script> including this JS)
@@ -609,6 +615,7 @@ class SafenetworkApi {
     this.safeUtils = safeUtils
 
     // Constants
+    this.CONSTANTS = CONSTANTS
     this.ERRORS = SafenetworkJsErrors
     this.SN_TAGTYPE_SERVICES = SN_TAGTYPE_SERVICES
     this.SN_TAGTYPE_NFS = SN_TAGTYPE_NFS
@@ -970,46 +977,18 @@ class SafenetworkApi {
   async initUnauthorised (appInfo, appOptions, argv) {
     logApi('%s.initUnauthorised(%O)...', this.constructor.name, appInfo)
     this._initialAppSettings(appInfo ? appInfo : untrustedAppInfo, undefined, appOptions)
-    return this.setSafeAppHandle(await this.safeApi.initUnauthorised(appInfo, appOptions, this._networkStateCallback, argv))
-  }
+    this.setSafeAppHandle(await this.safeApi.initUnauthorised(appInfo, appOptions, this._networkStateCallback, argv))
 
-  // TODO - DELETE
-  // async initReadOnly (appInfo = untrustedAppInfo) {
-  //   // TODO review/update
-  //   logApi('%s.initReadOnly(%O) is DEPRECATED, use initUnauthorised() instead', this.constructor.name, appInfo)
-  //
-  //   let tmpAppHandle
-  //   try {
-  //     tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
-  //       // Callback for network state changes
-  //       logApi('SafeNetwork state changed to: ', newState)
-  //       this._isConnected = newState // TODO bugchase
-  //     })
-  //
-  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-  //     this.setSafeAppHandle(tmpAppHandle)
-  //     this._safeAppInfo = appInfo
-  //     this._safeAppContainers = undefined
-  //     if (window) {
-  //       let connUri = await this.auth.genConnUri()
-  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-  //
-  //       this._safeAuthUri = await this.safeApi.authorise(connUri)
-  //       logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-  //
-  //       await this.auth.loginFromUri(this._safeAuthUri)
-  //       this._isConnected = true // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     } else {
-  //       logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-  //       this._isConnected = 'Connected' // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     }
-  //     return this._appHandle
-  //   } catch (err) {
-  //     logApi('WARNING: ', err)
-  //     this.setSafeAppHandle(null)
-  //     throw (err)
-  //   }
-  // }
+    try { // Report on support for Promise.finally()
+      this.auth.getContainer('_public').then((md) = {
+      }).catch((r) => {
+      }).finally(() => {
+        console.log('FINALLY!!! Promise.finally() is supported')
+      })
+    } catch (e) {
+      console.error('WARNING Promise.finally() IS NOT YET SUPPORTED IN SAFE BROWSER (issue #807)')
+    }
+  }
 
   /**
    * Initialise SafenetworkApi and authorised connection to SAFE Network
@@ -1033,52 +1012,6 @@ class SafenetworkApi {
 
     return this.setSafeAppHandle(await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv))
   }
-
-  // TODO - DELETE
-  // async simpleAuthorise (appInfo, appContainers) {
-  //   logApi('%s.simpleAuthorise(%O,%O) is DEPRECATED, use initAuthorised() instead', this.constructor.name, appInfo, appContainers)
-  //
-  //   // TODO ??? not sure what I'm thinking here...
-  //   // TODO probably best to have initialise called once at start so can
-  //   // TODO access the API with or without authorisation. So: remove the
-  //   // TODO initialise call to a separate point and only call it once on
-  //   // TODO load. Need to change freeSafeAPI() or not call it above.
-  //   //
-  //   // TODO I think once I have this._safeAuthUri I should be able
-  //   // TODO to just try auth.loginFromUri() with that to skip the UI prompts
-  //
-  //   this._authOnAccessDenied = true // Enable auth inside SafenetworkApi.fetch() on 401
-  //
-  //   let tmpAppHandle
-  //   try {
-  //     tmpAppHandle = await this.safeApi.initialiseApp(appInfo, (newState) => {
-  //       // Callback for network state changes
-  //       logApi('SafeNetwork state changed to: ', newState)
-  //       this._isConnected = newState // TODO bugchase
-  //     })
-  //
-  //     logApi('SAFEApp instance initialised and appHandle returned: ', tmpAppHandle)
-  //     this.setSafeAppHandle(tmpAppHandle)
-  //     this._isConnected = 'Connected' // TODO to remove (see https://github.com/maidsafe/beaker-plugin-safe-app/issues/123)
-  //     this._safeAppInfo = appInfo
-  //     this._safeAppContainers = (appContainers !== undefined ? appContainers : defaultAppContainers)
-  //
-  //     // await this.testsNoAuth();  // TODO remove (for test only)
-  //     let authReqUri = await this.auth.genAuthUri(this._safeAppContainers, this._safeAppInfo.options)
-  //     this._safeAuthUri = await this.safeApi.authorise(authReqUri)
-  //     logApi('SAFEApp was authorised and authUri received: ', this._safeAuthUri)
-  //
-  //     await this.auth.loginFromUri(this._safeAuthUri)
-  //     logApi('SAFEApp was authorised & a session was created with the SafeNetwork')
-  //     await this.testsAfterAuth()  // TODO remove (for test only)
-  //     this._isAuthorised = true
-  //     return this._appHandle
-  //   } catch (err) {
-  //     logApi('WARNING: ', err)
-  //     this.setSafeAppHandle(null)
-  //     throw (err)
-  //   }
-  // }
 
   /* --------------------------
    * Mutable Data Helpers
@@ -1640,7 +1573,7 @@ class SafenetworkApi {
     if (name &&
         name.length >= CONSTANTS.PUBLICNAME_MINCHARS &&
         name.length <= CONSTANTS.PUBLICNAME_MAXCHARS &&
-        name.match(/^[a-z0-9]*$/)) {
+        name.match(/^[a-z0-9\-]*$/)) {
       return true
     }
     return false
@@ -1886,21 +1819,48 @@ class SafenetworkApi {
     return this._activeServices.get(host)
   }
 
-  // Get the service enabled for a URI
-  //
-  // Maintains a cache of handlers for each host, so once a service has
-  // been assigned to a host address the service implementation is already known
-  // for any URI with that host. If the appropriate service for a host changes,
-  // it would be necessary to clear its cached service by setting _activeServices.delete(<host>)
-  // to null, and the next call would allocate a service from scratch.
-  //
-  // @param a valid safe:// style URI
-  // @returns a promise which evaluates to a ServiceInterface which supports fetch() operations
-  //
-  // @param a valid safe:// style URI
-  // @returns a promise which evaluates to a service implementation object, or null if no service installed on host
+  /**
+   * Get the service enabled for a URI
+   * Maintains a cache of handlers for each host, so once a service has
+   * been assigned to a host address the service implementation is already
+   * known for any URI with that host. If the appropriate service for a
+   * host changes, it would be necessary to clear its cached service by
+   * setting _activeServices.delete(<host>) to null, and the next call
+   * would allocate a service from scratch.
+   *
+   * Notes:
+   *  - normally the browser handles www, so a service is not usually set up
+   *    for www
+   *  - it is desirable for a given URI to have more than one service
+   *    available so that a basic/default service can be used for most
+   *    clients, while more capable clients can handle enhanced or alternative
+   *    service protocols on the same URI. One way that the SAFE API could
+   *    support this is to allow multiple services to be specified for
+   *    a URI and leave the client to decide which to setup and use. This
+   *    ability is not yet supported in SAFE API (existing or experimental),
+   *    but has been requested:
+   *       Issue #377: Support for multiple service types on a given safe URI
+   *       https://github.com/maidsafe/safe_app_nodejs/issues/377
+   *  - TODO depending on support (see safe_app_nodejs issue #377):
+   *    it is valid for both a www service and up to one additional service
+   *    to be set up on a given URI. In this case, the non-www service will
+   *    be set up, and if it does not have its own serviceValue, it will be
+   *    set up using that from the corresponding www service. This is useful
+   *    for services that are compatible with www storage, so that clients
+   *    which don't support the additional service will fall back to browser
+   *    fetch(). For example, Solid apps can use an LDP to read and write data
+   *    and non-Solid apps can access the same storage using www.
+   *
+   * @param  {String}  uri a valid safe:// style URI
+   * @return {Promise} a ServiceInterface which supports fetch(). or undefined
+   */
   async getServiceForUri (uri) {
     logApi('getServiceForUri(%s)...', uri)
+
+    // Temp solution that supports SAFE experimental API and
+    // supports Solid apps by providing LDP service on everything!
+    return this.exGetServiceForUri(uri)
+
     try {
       let host = hostpart(uri)
       let service = await this._activeServices.get(host)
@@ -1916,6 +1876,140 @@ class SafenetworkApi {
         uriProfile = 'www'
       }
       logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+
+      // Get the services MD for publicName
+      let servicesMd = await this.getServicesMdFor(publicName)
+      let listingQ = []
+      let matchedServiceValue  // Used when setting up default service on www container
+
+      let entries = await servicesMd.getEntries()
+      logApi("checking servicesMd entries for host '%s'", host)
+      this.hostedService = null
+      let entriesList = await entries.listEntries()
+      await entriesList.forEach(async (entry) => {
+        listingQ.push(new Promise(async (resolve, reject) => {
+          logApi('Key: ', entry.key.toString())
+          logApi('Value: ', entry.value.buf.toString())
+          logApi('Version: ', entry.value.version)
+          let serviceKey = entry.key.toString()
+          if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+            logApi('Skipping metadata entry: ', serviceKey)
+            resolve()
+            return  // Skip
+          }
+
+          // Defaults:
+          let serviceProfile = ''
+          let serviceId = 'www'
+
+          if (serviceKey.indexOf('@' === -1)) {
+            serviceProfile = serviceKey
+          } else {
+            serviceProfile = serviceKey.split('@')[0]
+            serviceId = serviceKey.split('@')[1]
+            if (!serviceId || serviceId === '') serviceId = 'www'
+          }
+
+          let serviceValue = entry.value
+          logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+          if (serviceProfile === uriProfile && !newHostedService) {
+            let serviceFound = this._availableServices.get(serviceId)
+            if (serviceFound) {
+              // Use the installed service to enable the service on this host
+              let newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
+              this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
+              logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+              this.hostedService = newHostedService
+            } else {
+              // Save www container if the uriProfile is for a www service
+              if (serviceId === 'www' ) matchedServiceValue = serviceValue
+
+              logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+            }
+          }
+          resolve() // Done
+        }))
+      })
+      await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
+
+// TODO delete this and refs above to matchedServiceId and matchedServiceValue:
+      // // We setup 'ldp' if we matched a 'www' service and nothing else
+      // // This is a hack for now which means that any web service can be
+      // // accessed by an LDP client without an LDP service being indicated
+      // // in the services container.
+      // if (!this.hostedService && matchedServiceId === 'www' && matchedServiceValue !== undefined) {
+      //   let serviceFound = this._availableServices.get(serviceId)
+      //   if (serviceFound) {
+      //     // Use the installed service to enable the service on this host
+      //     let newHostedService = await serviceFound.makeServiceInstance(host, matchedServiceValue)
+      //     this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
+      //     logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+      //     this.hostedService = newHostedService
+      //   }
+      // }
+
+      if (!this.hostedService) {
+        logApi("WARNING no service setup for host '" + host + "'")
+      }
+      return this.hostedService
+    } catch (err) {
+      logApi('getServiceForUri(%s) FAILED: %s', uri, err)
+      return null
+    } finally {
+      // TODO implement memory freeing stuff using 'finally' throughout the code!
+    }
+  }
+
+  // Version for use with experimental RDF API (subNamesContainer using RDF)
+  // (experimental SAFE API used by WebID Manager PoC)
+  async exGetServiceForUri (uri) {
+    logApi('exGetServiceForUri(%s)...', uri)
+    try {
+      let host = hostpart(uri)
+      let service = await this._activeServices.get(host)
+      if (service) {
+        return service
+      } // Already initialised
+
+      // Look up the service on this host: profile.public-name
+      let uriProfile = host.split('.')[0]
+      let publicName = host.split('.')[1]
+      if (publicName === undefined) {
+        publicName = host
+        uriProfile = 'www'
+      }
+      logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+
+      // TODO support multiple service types per service URI (see safe_app_nodejs issue #377)
+      //
+      // Until multiple service types are supported by RDF subNamesContainer:
+      // - assume we have a www service / NFS container
+      // - set up LDP service so anything using SafenetworkJS fetch() has LDP
+      // -> this allows Solid apps to work on SAFE, and allows other clients
+      //    including SAFE Browser to serve the same content over SAFE www
+      //
+      let serviceValue
+      let serviceContainer = await this.exGetContainerFromPublicId(publicName, uriProfile)
+      if (serviceContainer.type === CONSTANTS.DATA_TYPE_RDF) {
+        // TODO support RDF containers (requires all of SafenetworkJS to support them!)
+        logApi("WARNING RDF based services not yet supported - no service available.")
+        return undefined // Skip RDF containers
+      } else if (serviceContainer.type === CONSTANTS.DATA_TYPE_NFS) {
+        let serviceId = SN_SERVICEID_LDP
+        let ldpService = this._availableServices.get(serviceId)
+        if (ldpService) {
+          // Use the installed service to enable the service on this host
+          let newHostedService = await ldpService.makeServiceInstance(host, serviceValue) // serviceValue is undefined so we hack...
+          this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
+          newHostedService._storageMd = serviceContainer // Hack to set container MD
+          logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+          return newHostedService
+        } else {
+          logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+        }
+      }
+      // logApi('Unknown container type for: %o', serviceContainer)
+      throw Error('rdfGetServiceForUri() ERROR - Unknown container type: ', serviceContainer.type)
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
@@ -1978,6 +2072,412 @@ class SafenetworkApi {
       // TODO implement memory freeing stuff using 'finally' throughout the code!
     }
   }
+
+  async NEW_getServiceForUri (uri) {
+    logApi('getServiceForUri(%s)...', uri)
+    try {
+      let host = hostpart(uri)
+      let service = await this._activeServices.get(host)
+      if (service) {
+        return service
+      } // Already initialised
+
+      const serviceEntries = await this.getMatchingServices(host)
+
+      let defaultServiceValue
+      // If we have two services one must be 'www', and we might need its container
+      if (serviceEntries.length === 2) {
+        defaultServiceValue = serviceEntries['www']
+        serviceEntries.splice(serviceEntries.indexOf('www'),1)
+      }
+      // Note: we assume serviceEntries.length is now 1. If there are more matching
+      // services at this point only the first will be set up.
+      let newHostedService
+      let serviceId = serviceEntries.keys()[0]
+      if (serviceId && serviceId.length >= 0) {
+        let serviceValue = serviceEntries[serviceId]
+        if (serviceValue && serviceValue.length >= 0) serviceValue = defaultServiceValue
+
+        let serviceFound = this._availableServices.get(serviceId)
+        if (serviceFound) {
+          // Use the installed service to enable the service on this host
+          newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
+          this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
+          logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+        } else {
+          logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+        }
+      }
+
+      if (!newHostedService) {
+        logApi("WARNING no service setup for host '" + host + "'")
+      }
+      return newHostedService
+    } catch (err) {
+      logApi('getServiceForUri(%s) FAILED: %s', uri, err)
+      return null
+    }
+  }
+
+  /**
+   * Get a map of service name to service value, for each service matching 'host'
+   *
+   * Typically there will only be one matching service, but we return a map
+   * in case more than one service has been created for the given host subName.
+   *
+   * @param  {String}  host (ie the [subName.]publicName part of a safe URI)
+   * @return {Promise}      map of service names to service value, on the subName
+   */
+  async getMatchingServices (host) {
+    logApi('getMatchingServices(%s)...', host)
+    // Look up the service on this host: profile.public-name
+    let uriProfile = host.split('.')[0]
+    let publicName = host.split('.')[1]
+    if (publicName === undefined) {
+      publicName = host
+      uriProfile = 'www'
+    }
+    logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+
+    // Get the services MD for publicName
+    let servicesMd = await this.getServicesMdFor(publicName)
+    let listingQ = []
+    let servicesMap = []
+    let entries = await servicesMd.getEntries()
+    logApi("checking servicesMd entries for host '%s'", host)
+    let entriesList = await entries.listEntries()
+    await entriesList.forEach(async (entry) => {
+      listingQ.push(new Promise(async (resolve, reject) => {
+        logApi('Key: ', entry.key.toString())
+        logApi('Value: ', entry.value.buf.toString())
+        logApi('Version: ', entry.value.version)
+        let serviceKey = entry.key.toString()
+        if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+          logApi('Skipping metadata entry: ', serviceKey)
+          resolve()
+          return  // Skip
+        }
+
+        // Defaults:
+        let serviceProfile = ''
+        let serviceId = 'www'
+
+        if (serviceKey.indexOf('@' === -1)) {
+          serviceProfile = serviceKey
+        } else {
+          serviceProfile = serviceKey.split('@')[0]
+          serviceId = serviceKey.split('@')[1]
+          if (!serviceId || serviceId === '') serviceId = 'www'
+        }
+
+        let serviceValue = entry.value
+        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        if (serviceProfile === uriProfile) {
+          servicesMap.push({ serviceId: serviceValue })
+        }
+        resolve() // Done
+      }))
+    })
+    await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
+
+    logApi('servicesMap: %O', servicesMap)
+    return servicesMap
+  }
+
+  /**
+   * Get a map of service name to service value for each service matching subName
+   *
+   * Typically there will only be one matching service, but we return a map
+   * in case more than one service has been created for the given host subName.
+   *
+   * @param  {MutableData}  servicesMd
+   * @param  {String}       subName
+   * @return {Promise}      map of service names to service value, on the subName
+   */
+  async getMatchingServicesFromMd (servicesMd, subName) {
+    logApi('getMatchingServicesFromMd(%o)...', servicesMd)
+    let listingQ = []
+    let servicesMap = []
+    let entries = await servicesMd.getEntries()
+    logApi("checking servicesMd entries for host '%s'", host)
+    let entriesList = await entries.listEntries()
+    await entriesList.forEach(async (entry) => {
+      listingQ.push(new Promise(async (resolve, reject) => {
+        logApi('Key: ', entry.key.toString())
+        logApi('Value: ', entry.value.buf.toString())
+        logApi('Version: ', entry.value.version)
+        let serviceKey = entry.key.toString()
+        if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+          logApi('Skipping metadata entry: ', serviceKey)
+          resolve()
+          return  // Skip
+        }
+
+        // Defaults:
+        let serviceProfile = ''
+        let serviceId = 'www'
+
+        if (serviceKey.indexOf('@' === -1)) {
+          serviceProfile = serviceKey
+        } else {
+          serviceProfile = serviceKey.split('@')[0]
+          serviceId = serviceKey.split('@')[1]
+          if (!serviceId || serviceId === '') serviceId = 'www'
+        }
+
+        let serviceValue = entry.value
+        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        if (serviceProfile === subName) {
+          servicesMap.push({ serviceId: serviceValue })
+        }
+        resolve() // Done
+      }))
+    })
+    await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
+
+    logApi('servicesMap: %O', servicesMap)
+    return servicesMap
+  }
+
+  /** Experimental RDF support:
+   */
+
+  /**
+   * version of getMatchingServices() that understands SAFE experimental RDF
+   *
+   * @param  {String}  host part of URI: [subName.]publicName
+   * @return {Promise}      map of service names to service value, on the subName
+   */
+  async rdfGetMatchingServices (host) {
+    logApi('rdfGetMatchingServices(%s)...', host)
+    let parsedUrl = parseUrl(uri);
+    if (!parsedUrl.protocol) parsedUrl = parseUrl('safe://' + host)
+    const hostParts = parsedUrl.hostname.split('.')
+    let publicName = hostParts.pop()     // last one is 'publicName'
+    let subName = hostParts.join('.')    // all others are 'subNames'
+    if (subName === undefined) subName = 'www'
+
+    // Look up the service on this host: subName.public-name
+    logApi("URI has subName '%s' and publicName '%s'", subName, publicName)
+
+    let subNamesContainer = await this.getServicesMdFor(publicName)
+
+// ??? modify this to access RDF emulation of serviceMd - see exReadPublicIdAsRdf() below
+// The current subNamesContainer RDF does not allow more than one service
+// entry per subName. I.e. safe://me.pubname can only map to one service.
+// I've made a safe_app_nodejs feature request (issue #377) to
+// support multiple service types on a given safe URI.
+
+    let serviceMd;
+    let servicesMap = []
+    let servicesMap2 = []
+    let xorName
+    try {
+      const graphId = `safe://${subName}.${publicName}`;
+      const rdfEmulation = await subNamesContainer.emulateAs('rdf');
+      await rdfEmulation.nowOrWhenFetched([graphId]);
+      const SAFETERMS = rdfEmulation.namespace('http://safenetwork.org/safevocab/');
+      let match = rdfEmulation.statementsMatching(rdfEmulation.sym(graphId), SAFETERMS('xorName'), undefined);
+      xorName = match[0].object.value.split(',');
+      match = rdfEmulation.statementsMatching(rdfEmulation.sym(graphId), SAFETERMS('typeTag'), undefined);
+      const typeTag = match[0].object.value;
+      serviceMd = await this.mutableData.newPublic(xorName, parseInt(typeTag, 10));
+    } catch (err) {
+      // there is no matching subName name
+      throw makeError(errConst.ERR_SERVICE_NOT_FOUND.code, errConst.ERR_SERVICE_NOT_FOUND.msg);
+    }
+    servicesMap.push({ $subName: xorName })
+
+    return servicesMap
+
+
+    let listingQ = []
+    let entries = await servicesMd.getEntries()
+    logApi("checking servicesMd entries for host '%s'", host)
+    let entriesList = await entries.listEntries()
+    await entriesList.forEach(async (entry) => {
+      listingQ.push(new Promise(async (resolve, reject) => {
+        logApi('Key: ', entry.key.toString())
+        logApi('Value: ', entry.value.buf.toString())
+        logApi('Version: ', entry.value.version)
+        let serviceKey = entry.key.toString()
+        if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+          logApi('Skipping metadata entry: ', serviceKey)
+          resolve()
+          return  // Skip
+        }
+
+        // Defaults:
+        let serviceProfile = ''
+        let serviceId = 'www'
+
+        if (serviceKey.indexOf('@' === -1)) {
+          serviceProfile = serviceKey
+        } else {
+          serviceProfile = serviceKey.split('@')[0]
+          serviceId = serviceKey.split('@')[1]
+          if (!serviceId || serviceId === '') serviceId = 'www'
+        }
+
+        let serviceValue = entry.value
+        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        if (serviceProfile === uriProfile) {
+          servicesMap.push({ serviceId: serviceValue })
+        }
+        resolve() // Done
+      }))
+    })
+    await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
+
+    logApi('servicesMap: %O', servicesMap)
+    return servicesMap
+  }
+
+  // /**
+  //  * Get a map of service name to service value for subName (RDF version)
+  //  *
+  //  * Typically there will only be one matching service, but we return a map
+  //  * in case more than one service has been created for the given host subName.
+  //  *
+  //  * @param  {MutableData}  servicesMd
+  //  * @param  {String}       subName
+  //  * @return {Promise}      map of service names to service valut, on the subName
+  //  */
+  // async rdfGetMatchingServicesFromMd (servicesMd, subName) {
+  //
+  //   ??? modify this to access RDF emulation of serviceMd - see exReadPublicIdAsRdf() below
+  //
+  //   logApi('getMatchingServicesFromMd(%o)...', servicesMd)
+  //   let listingQ = []
+  //   let servicesMap = []
+  //   let entries = await servicesMd.getEntries()
+  //   logApi("checking servicesMd entries for host '%s'", host)
+  //   let entriesList = await entries.listEntries()
+  //   await entriesList.forEach(async (entry) => {
+  //     listingQ.push(new Promise(async (resolve, reject) => {
+  //       logApi('Key: ', entry.key.toString())
+  //       logApi('Value: ', entry.value.buf.toString())
+  //       logApi('Version: ', entry.value.version)
+  //       let serviceKey = entry.key.toString()
+  //       if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
+  //         logApi('Skipping metadata entry: ', serviceKey)
+  //         resolve()
+  //         return  // Skip
+  //       }
+  //
+  //       // Defaults:
+  //       let serviceProfile = ''
+  //       let serviceId = 'www'
+  //
+  //       if (serviceKey.indexOf('@' === -1)) {
+  //         serviceProfile = serviceKey
+  //       } else {
+  //         serviceProfile = serviceKey.split('@')[0]
+  //         serviceId = serviceKey.split('@')[1]
+  //         if (!serviceId || serviceId === '') serviceId = 'www'
+  //       }
+  //
+  //       let serviceValue = entry.value
+  //       logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+  //       if (serviceProfile === subName) {
+  //         servicesMap.push({ serviceId: serviceValue })
+  //       }
+  //       resolve() // Done
+  //     }))
+  //   })
+  //   await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
+  //
+  //   logApi('servicesMap: %O', servicesMap)
+  //   return servicesMap
+  // }
+
+  /*---------------------------------------------------------------------------
+   * Start of code borrowed from safe_app_nodejs/src/web_fetch.js
+   * for SAFE experimental RDF implementation.
+   */
+  makeError(code, message) {
+    let e = new Error(message)
+    e.code = code
+    return e
+  }
+
+  /**
+   * Get services container for public name (RDF version)
+   *
+   * @param  {MutableData} subNamesContainer [description]
+   * @param  {String} pubName           [description]
+   * @param  {String} subName           [description]
+   * @return {MutableData, String}  Promise {servicesMd, DATA_TYPE_RDF}
+   */
+  async exReadPublicIdAsRdf(subNamesContainer, pubName, subName) {
+    logApi('exReadPublicIdAsRdf(%o, %s, %s)', subNamesContainer, pubName, subName)
+    let serviceMd;
+    try {
+      const graphId = `safe://${subName}.${pubName}`;
+      const rdfEmulation = await subNamesContainer.emulateAs('rdf');
+      await rdfEmulation.nowOrWhenFetched([graphId]);
+      const SAFETERMS = rdfEmulation.namespace('http://safenetwork.org/safevocab/');
+      let match = rdfEmulation.statementsMatching(rdfEmulation.sym(graphId), SAFETERMS('xorName'), undefined);
+      const xorName = match[0].object.value.split(',');
+      match = rdfEmulation.statementsMatching(rdfEmulation.sym(graphId), SAFETERMS('typeTag'), undefined);
+      const typeTag = match[0].object.value;
+      serviceMd = await this.mutableData.newPublic(xorName, parseInt(typeTag, 10));
+    } catch (err) {
+      // there is no matching subName name
+      throw this.makeError(errConst.ERR_SERVICE_NOT_FOUND.code, errConst.ERR_SERVICE_NOT_FOUND.msg);
+    }
+
+    serviceMd.type = CONSTANTS.DATA_TYPE_RDF
+    return serviceMd
+  }
+
+  /**
+   * Get services container
+
+   * @param  {String} pubName
+   * @param  {String} subName
+   * @return {MutableData, String}  Promise {servicesMd, DATA_TYPE_NFS|DATA_TYPE_RDF}
+   */
+  async exGetContainerFromPublicId(pubName, subName) {
+    logApi('exGetContainerFromPublicId(%s, %s)', pubName, subName)
+    let serviceInfo;
+    let subNamesContainer;
+    try {
+      const address = await this.crypto.sha3Hash(pubName);
+      subNamesContainer = await this.safeApp.mutableData.newPublic(address, consts.TAG_TYPE_DNS);
+      logApi('subNamesContainer: %o', subNamesContainer)
+      serviceInfo = await subNamesContainer.get(subName || 'www'); // default it to www
+    } catch (err) {
+      switch (err.code) {
+        case errConst.ERR_NO_SUCH_DATA.code:
+          // there is no container stored at the location
+          throw this.makeError(errConst.ERR_CONTENT_NOT_FOUND.code, errConst.ERR_CONTENT_NOT_FOUND.msg);
+        case errConst.ERR_NO_SUCH_ENTRY.code:
+          // Let's then try to read it as an RDF container
+          return this.exReadPublicIdAsRdf.call(this, subNamesContainer, pubName, subName);
+        default:
+          throw err;
+      }
+    }
+
+    if (serviceInfo.buf.length === 0) {
+      // the matching service name was soft-deleted
+      throw this.makeError(errConst.ERR_SERVICE_NOT_FOUND.code, errConst.ERR_SERVICE_NOT_FOUND.msg);
+    }
+
+    let serviceMd;
+    try {
+      serviceMd = await this.mutableData.fromSerial(serviceInfo.buf);
+    } catch (e) {
+      serviceMd = await this.mutableData.newPublic(serviceInfo.buf, consts.TAG_TYPE_WWW);
+    }
+
+    serviceMd.type = CONSTANTS.DATA_TYPE_NFS
+    return serviceMd
+  }
+
+  /* End of code borrowed from safe_app_nodejs experimental RDF implementation.
+   ---------------------------------------------------------------------------*/
 
   /* --------------
   * Helper Methods
@@ -2049,12 +2549,22 @@ class SafenetworkApi {
 
   // Helper to create the key for looking up the service installed on a host
   //
-  // TODO ensure hostProfile is valid before attempting (eg lowercase, no illegal chars such as '@')
+  // Note that web services use a different key structure to other services.
+  //
+  // A web service uses the subName as the key, or 'www' if the subName is
+  // omitted or an empty string. All other services use a key with
+  // the form subName@serviceId (e.g. storage@ldp)
+  //
+  // For reference, see:
+  // - safe_app_nodejs/src/web_fetch.js / getContainerFromPublicId()
   //
   // @param hostProfile prefix of a host address, which is [profile.]public-name
   // @param serviceId
   //
   // @returns the key as a string, corresponding to a service entry in a servicesMD
+  //
+  // TODO ensure hostProfile is valid before attempting (eg lowercase, no illegal chars such as '@')
+  //
   makeServiceEntryKey (hostProfile, serviceId) {
     if (serviceId === SN_SERVICEID_WWW) {
       return (hostProfile & hostProfile.length > 0 ? hostProfile : 'www')
@@ -2143,6 +2653,10 @@ class SafenetworkApi {
         if (!options.method) {
           options.method = 'GET'
         }
+        if (typeof(options.body) === 'object') {
+          // If body is a Blob convert it to ArrayBuffer for SAFE APIs
+          options.body = await new Response(options.body).arrayBuffer()
+        }
 
         logRest('%s %s %s', service.getIdString(), options.method, docUri)
         let handler = service.getHandler(options.method)
@@ -2207,7 +2721,7 @@ class SafenetworkApi {
     // Install an LDP service
     let profile = 'ldp'
     //    name = name + '.0'
-    let serviceId = 'ldp'
+    let serviceId = SN_SERVICEID_LDP
     let servicesMd = await this.getServicesMdFor(name)
     if (servicesMd) {
       logTest("servicesMd for public name '%s' contains...", name)
@@ -2234,7 +2748,7 @@ class SafenetworkApi {
 
   async test_createPublicNameAndSetupService (publicName, hostProfile, serviceId) {
     logTest('>>>>>> TEST: createPublicNameAndSetupService(%s,%s,%s)...', publicName, hostProfile, serviceId)
-    let createResult = await this.createPublicNameAndSetupService(publicName, hostProfile, 'ldp')
+    let createResult = await this.createPublicNameAndSetupService(publicName, hostProfile, SN_SERVICEID_LDP)
     logTest('test result: %O', createResult)
 
     await this.listContainer('_publicNames')
@@ -2977,7 +3491,7 @@ class SafeServiceLDP extends ServiceInterface {
     let docPath = this.safeJs.nfsPathPart(docUri)
 
     try {
-      this.safeJs.listContainer('_publicNames') // TODO remove this debug
+      // this.safeJs.listContainer('_publicNames') // TODO remove this debug
 
       // logLdp('DEBUG:  this.storageNfs().create()...')
       let nfsFile = await (await this.storageNfs()).create(body)
@@ -3153,6 +3667,7 @@ class SafeServiceLDP extends ServiceInterface {
       debug('safe:TMP 1')
       // Create listing by enumerating container keys beginning with docPath
       const directoryEntries = []
+      logLdp('storageMd() returns: %o', await this.storageMd())
       let entries = await (await this.storageMd()).getEntries()
       let entriesList = await entries.listEntries()
       debug('safe:TMP 2')
@@ -3160,8 +3675,8 @@ class SafeServiceLDP extends ServiceInterface {
         directoryEntries.push(new Promise(async (resolve, reject) => {
 
           debug('safe:TMP 3')
-          // Skip deleted entries
-          if (entry.value.buf.length === 0) {
+          // Skip metadata entry and deleted entries
+          if (entry.value.buf.length === 0 || entry.key.toString() === CONSTANTS.MD_METADATA_KEY) {
             // TODO try without this...
             debug('safe:TMP 4')
             resolve()
