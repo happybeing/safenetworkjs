@@ -96,7 +96,7 @@ WebID profile.
       const webIdSym = hasMeAlready ? rdf.sym(this.uri) : rdf.sym(`${this.uri}#me`);
 
       rdf.removeMany(webIdSym, this.vocabs.PIM('space#storage'), null);
-      rdf.add(webIdSym, this.vocabs.PIM('space#storage'), rdf.literal(storageUri));
+      rdf.add(webIdSym, this.vocabs.PIM('space#storage'), rdf.sym(storageUri));
     }
 
     getStorageLocation() {
