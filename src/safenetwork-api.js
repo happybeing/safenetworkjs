@@ -478,11 +478,11 @@ const getBaseUri = safeUtils.getBaseUri
 *
 */
 
-// For connection without authorisation (see initUnauthorised())
+// Default appInfo when connecting without authorisation (see initUnauthorised())
 const untrustedAppInfo = {
-  id: 'Untrusted',
-  name: 'Do NOT authorise this app',
-  vendor: 'Untrusted'
+  id: 'Unidentified app',
+  name: 'WARNING: do not click Accept unless you trust this app',
+  vendor: 'Unkown vendor'
 }
 
 // Default permissions to request. Optional parameter to SafenetworkApi.initAuthorised()
@@ -540,7 +540,7 @@ class SafenetworkApi {
     // Must be set by either:
     // - index.js (nodejs app), or
     // - index-web.js (Browser app)
-    if (!safeApi) debug( 'WARNING safeApi is not valid')
+    if (!safeApi) debug( 'WARNING: safeApi is not valid')
 
     /*
     * Access to helpers and constants via the object (useful when <script> including this JS)
@@ -553,6 +553,7 @@ class SafenetworkApi {
     this.hostpart = hostpart
     this.protocol = protocol
     this.parentPathNoDot = parentPathNoDot
+    this.untrustedAppInfo = untrustedAppInfo
 
     this._availableServices = new Map() // Map of installed services
 
@@ -562,6 +563,29 @@ class SafenetworkApi {
     this._isConnected = undefined
     this.initialise()
     this.initialiseServices()
+  }
+
+  // Init SAFE App object, and try auth from saved auth URI
+  //
+  // IMPORTANT:
+  // Apps should normally negate the need for this by using
+  // initAuthorised(). This is only provided as a fallback
+  // option for apps which don't know about the SAFE API,
+  // such as Solid apps which use solid-auth-client (SAFE fork)
+  async _initSafeApp () {
+    logApi('initSafeApp()...')
+    if (!this.safeApi) {
+      logApi('FAILED because this.safeApi is ', this.safeApi)
+      return
+    }
+
+    if (!this._appHandle) {
+        this.setSafeAppHandle(await this.safeApi.initFromSavedUri(this.untrustedAppInfo, this._networkStateCallback), true)
+    }
+
+    if (!this._appHandle) {
+        await this.initUnauthorised()
+    }
   }
 
   initialise () {
@@ -867,9 +891,10 @@ class SafenetworkApi {
    * pass the SAFEApp handle to SafenetworkJS by calling setSafeAppHandle().
    *
    * @param {SAFEApp} appHandle  from SAFE API see this.safeApi.initialiseApp()
+   * @param {SAFEApp} isAuthorised [optional] true indicates successful SAFE API initAuthorised()
    */
 
-  setSafeAppHandle (appHandle) {
+  setSafeAppHandle (appHandle, isAuthorised) {
     this.initialise()             // Clears active services (so DOM API handles will be discarded)
     this._appHandle = appHandle   // SAFE API application handle
 
@@ -883,7 +908,7 @@ class SafenetworkApi {
       this.mutableData = this._appHandle.mutableData
       this.webFetch = this._appHandle.webFetch
 
-      this._isAuthorised = true
+      this._isAuthorised = isAuthorised ? true : false
 
       // Can't do this unless I make setSafeAppHandle() async
       // try { await this.initTests() } catch (e) { debug(e) }
@@ -891,6 +916,7 @@ class SafenetworkApi {
   }
 
   // Intended mainly for mock, create a container to mess with
+  // App should call safeJs.initTests() after safeJs.initAuthorised()
   async initTests () {
     let testKey = '_public/tests/data1'
 
@@ -967,7 +993,7 @@ class SafenetworkApi {
    *  - if authorising using another method you MUST call SafenetworkApi.setSafeAppHandle()
    *    with a valid SAFEAppHandle
    *
-   * @param  {Object} [appInfo=untrustedAppInfo] information about app for auth UI, if ommitted generic 'untrusted' will appear.
+   * @param  {Object} [appInfo=this.untrustedAppInfo] information about app for auth UI, if ommitted generic 'untrusted' will appear.
    * @param  {appOptions} appOptions [optional] SAFEApp options
    * @param  {Object}  argv [optional] required only for command lin authorisation
    * @return {Promise}  SAFEAppHandle.
@@ -976,18 +1002,20 @@ class SafenetworkApi {
    */
   async initUnauthorised (appInfo, appOptions, argv) {
     logApi('%s.initUnauthorised(%O)...', this.constructor.name, appInfo)
-    this._initialAppSettings(appInfo ? appInfo : untrustedAppInfo, undefined, appOptions)
-    this.setSafeAppHandle(await this.safeApi.initUnauthorised(appInfo, appOptions, this._networkStateCallback, argv))
+    this._initialAppSettings(appInfo ? appInfo : this.untrustedAppInfo, undefined, appOptions)
+    this.setSafeAppHandle(await this.safeApi.initUnauthorised(this._safeAppInfo, this._safeAppOptions, this._networkStateCallback, argv))
+this._isConnected = 'Connected' // TODO this is a hack as the callback is not setting this
 
-    try { // Report on support for Promise.finally()
-      this.auth.getContainer('_public').then((md) = {
-      }).catch((r) => {
-      }).finally(() => {
-        console.log('FINALLY!!! Promise.finally() is supported')
-      })
-    } catch (e) {
-      console.error('WARNING Promise.finally() IS NOT YET SUPPORTED IN SAFE BROWSER (issue #807)')
-    }
+    // try { // Report on support for Promise.finally()
+    //   this.auth.getContainer('_public').then((md) = {
+    //   }).catch((r) => {
+    //   }).fi
+    // nally(() => {
+    //     console.log('FINALLY!!! Promise.finally() is supported')
+    //   })
+    // } catch (e) {
+    //   console.error('WARNING: Promise.finally() IS NOT YET SUPPORTED IN SAFE BROWSER (issue #807)')
+    // }
   }
 
   /**
@@ -1005,12 +1033,14 @@ class SafenetworkApi {
    * @param  {Object}  argv [optional] required only for command lin authorisation
    * @return {Promise}
    */
-  async initAuthorised  (appInfo, appContainers, ownContainer, appOptions, argv) {
+  async initAuthorised (appInfo, appContainers, ownContainer, appOptions, argv) {
     logApi('%s.initAuthorised(%O, %O, %s, %O, %O)...', this.constructor.name, appInfo, appContainers, ownContainer, appOptions, argv)
     this._initialAppSettings(appInfo, appContainers, appOptions, true /*enableAutoAuth*/)
     let authOptions = (ownContainer ? { own_container: true } : undefined)
-
-    return this.setSafeAppHandle(await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv))
+logApi('Calling this.safeApi.initAuthorised()')
+    const appHandle = await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv)
+logApi('appHandle returned: %o', appHandle)
+    return this.setSafeAppHandle(appHandle, true)
   }
 
   /* --------------------------
@@ -1113,7 +1143,7 @@ class SafenetworkApi {
           result = await this.nfsRawMutate(nfs, operation, fileName, file, version, newMetadata)
         } catch (e) { error(e); return e }
       } else {
-        debug('%s.nfsArpMutate() - %s() failed on NFS object', this.constructor.name, operation)
+        debug('%s.nfsMutate() - %s() failed on NFS object', this.constructor.name, operation)
         error(e)
         return e
       }
@@ -1293,7 +1323,7 @@ class SafenetworkApi {
       return valueVersion
     } catch (err) {
       logApi(err)
-      logApi("getMutableDataValueVersion() WARNING no entry found for key '%s'", key)
+      logApi("getMutableDataValueVersion() WARNING: no entry found for key '%s'", key)
       if (err.code !== CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY) throw err
     }
   }
@@ -1353,7 +1383,7 @@ class SafenetworkApi {
       logApi('Mutable Data Entry %s', (mustNotExist ? 'inserted' : 'updated'))
       return true
     } catch (err) {
-      logApi('WARNING - unable to set mutable data value: ', err)
+      logApi('WARNING: unable to set mutable data value: ', err)
       throw err
     }
   }
@@ -1393,7 +1423,7 @@ class SafenetworkApi {
         valueVersion: valueVersion
       }
     } catch (err) {
-      logApi('getPublicNameEntry() WARNING no _publicNames entry found for: %s', publicName)
+      logApi('getPublicNameEntry() WARNING: no _publicNames entry found for: %s', publicName)
     }
 
     return null
@@ -1924,7 +1954,7 @@ class SafenetworkApi {
               // Save www container if the uriProfile is for a www service
               if (serviceId === 'www' ) matchedServiceValue = serviceValue
 
-              logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+              logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
             }
           }
           resolve() // Done
@@ -1949,7 +1979,7 @@ class SafenetworkApi {
       // }
 
       if (!this.hostedService) {
-        logApi("WARNING no service setup for host '" + host + "'")
+        logApi("WARNING: no service setup for host '" + host + "'")
       }
       return this.hostedService
     } catch (err) {
@@ -1992,7 +2022,7 @@ class SafenetworkApi {
       let serviceContainer = await this.exGetContainerFromPublicId(publicName, uriProfile)
       if (serviceContainer.type === CONSTANTS.DATA_TYPE_RDF) {
         // TODO support RDF containers (requires all of SafenetworkJS to support them!)
-        logApi("WARNING RDF based services not yet supported - no service available.")
+        logApi("WARNING: RDF based services not yet supported - no service available.")
         return undefined // Skip RDF containers
       } else if (serviceContainer.type === CONSTANTS.DATA_TYPE_NFS) {
         let serviceId = SN_SERVICEID_LDP
@@ -2005,7 +2035,7 @@ class SafenetworkApi {
           logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
           return newHostedService
         } else {
-          logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+          logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
         }
       }
       // logApi('Unknown container type for: %o', serviceContainer)
@@ -2053,7 +2083,7 @@ class SafenetworkApi {
               logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
               this.hostedService = newHostedService
             } else {
-              logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+              logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
             }
           }
           resolve() // Done
@@ -2062,7 +2092,7 @@ class SafenetworkApi {
       await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
       if (!this.hostedService) {
-        logApi("WARNING no service setup for host '" + host + "'")
+        logApi("WARNING: no service setup for host '" + host + "'")
       }
       return this.hostedService
     } catch (err) {
@@ -2105,12 +2135,12 @@ class SafenetworkApi {
           this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
           logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
         } else {
-          logApi("WARNING service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+          logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
         }
       }
 
       if (!newHostedService) {
-        logApi("WARNING no service setup for host '" + host + "'")
+        logApi("WARNING: no service setup for host '" + host + "'")
       }
       return newHostedService
     } catch (err) {
@@ -2617,6 +2647,7 @@ class SafenetworkApi {
   //
   async fetch (docUri, options) {
     logApi('%s.fetch(%s,%o)...', this.constructor.name, docUri, options)
+    await this._initSafeApp()  // Ensure SAFE App is initialised
 
     let allowAuthOn401 = false // TODO reinstate: true
     try {
@@ -2667,18 +2698,43 @@ class SafenetworkApi {
       logApi('%s._fetch() error: %s', this.constructor.name, err)
     }
 
+    // Since SAFE webFetch() doesn't work in mock, we first try window.fetch()
+    if (!response && this.safeApp.appIsMock() && docUri.indexOf('safe://') !== 0) {
+      logApi('%s._fetch() - no service available, try window.fetch()...', this.constructor.name)
+
+      try {
+        response = await window.fetch(docUri, options)
+      } catch (err) {
+        logApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
+        response = new Response(null, {status: 500, statusText: 'Unknown error'})
+      }
+    }
+
     if (!response) {
       logApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
 
       try {
-        response = await this.safeApp.webFetch(docUri, options)
+        response = this._convertWebFetchResponse(await this.safeApp.webFetch(docUri, options))
       } catch (err) {
-        logApi('%s._fetch() error: %s', this.constructor.name, err)
-        response = new Response(null, {status: 404, statusText: 'Not Found'})
+        logApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
+        response = new Response(null, {status: 500, statusText: 'Unknown error'})
       }
     }
 
+    logApi('response: %o', response)
     return response
+  }
+
+  // Make webFetch() response suitable for rdflib.js Fetcher
+  _convertWebFetchResponse(wfr) {
+      const response = new Response(wfr.body, {
+        status: wfr.status,
+        statusText: wfr.statusText,
+        headers: new Headers(wfr.headers)
+      })
+      logApi('webFetch response: %o', wfr)
+      logApi('webFetch converted response: %o', response)
+      return response
   }
 
   // //// TODO debugging helpers (to remove):
@@ -3402,7 +3458,6 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('                 param containerVersion: ' + fileInfo.containerVersion)
         let perms // if auth is needed, request default permissions
         await safeJs.nfsMutate(await this.storageNfs(), perms, 'delete', docPath, undefined, fileInfo.version + 1)
-//        await (await this.storageNfs()).delete(docPath, fileInfo.version + 1)
         this._deleteFileInfo(docPath)
         return new Response(null, {status: 204, statusText: 'No Content'})
       }
@@ -3464,11 +3519,14 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('WARNING: attempt to update a folder')
       } else {
         // Store content as new immutable data (pointed to by nfsFile)
+        logLdp('Storing immutable content on SAFE...')
         let nfsFile = await (await this.storageNfs()).create(body)
+        logLdp('Content stored (create() successful), now to update.')
 
         // Add file to directory (by inserting nfsFile into container)
         // nfsFile = await (await this.storageNfs()).update(docPath, nfsFile, fileInfo.containerVersion + 1)
         let perms // if auth is needed, request default permissions
+        logLdp('Updating SAFE container...')
         await safeJs.nfsMutate(await this.storageNfs(), perms, 'update', docPath, nfsFile, fileInfo.version + 1)
         await this._updateFileInfo(nfsFile, docPath)
 
@@ -3476,7 +3534,8 @@ class SafeServiceLDP extends ServiceInterface {
         return new Response(null, {status: (nfsFile ? 200 : 400)})
       }
     } catch (err) {
-      logLdp('Unable to update file \'%s\' : %s', docUri, err)
+      logLdp('Unable to update file \'%s\' : %s', docUri, err.message)
+      logLdp('err: %o', err)
       // TODO can we decode the SAFE API errors to provide better error responses
       return new Response(null, {status: 500, statusText: '500 Internal Server Error (' + err + ')'})
     }
@@ -3493,14 +3552,14 @@ class SafeServiceLDP extends ServiceInterface {
     try {
       // this.safeJs.listContainer('_publicNames') // TODO remove this debug
 
-      // logLdp('DEBUG:  this.storageNfs().create()...')
+      logLdp('DEBUG:  this.storageNfs().create()...')
       let nfsFile = await (await this.storageNfs()).create(body)
       // mrhTODOx set file metadata (contentType) - how?
 
       // Add file to directory (by inserting nfsFile into container)
 
       // TODO delete comments
-      // logLdp('DEBUG:  this.storageNfs().insert(nfsFile,%s)...',docPath)
+      logLdp('DEBUG:  this.storageNfs().insert(nfsFile,%s)...',docPath)
       // nfsFile = await (await this.storageNfs()).insert(docPath, nfsFile)
       const valueVersion = await safeJs.getMutableDataValueVersion(await this.storageMd(), docPath)
       const version = valueVersion ? valueVersion.version : 0
@@ -3509,7 +3568,7 @@ class SafeServiceLDP extends ServiceInterface {
       let perms // if auth is needed, request default permissions
       await safeJs.nfsMutate(await this.storageNfs(), perms, operation, docPath, nfsFile, version + 1)
 
-      // logLdp('DEBUG:  this._updateFileInfo(...)...')
+      logLdp('DEBUG:  this._updateFileInfo(...)...')
       this._updateFileInfo(nfsFile, docPath)
 
       // TODO implement LDP POST response https://www.w3.org/TR/ldp-primer/
@@ -3551,6 +3610,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('fetched nfsFile: %o', nfsFile)
         fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
       } catch (err) {
+        logApi(err)
         return new Response(null, {status: 404, statusText: 'File not found'})
       }
       fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
@@ -3908,16 +3968,17 @@ class SafeServiceLDP extends ServiceInterface {
     logLdp('%s._addFileInfo(g,%s,%o)', this.constructor.name, reqUri, fileInfo)
 
     resourceGraph.add(resourceGraph.sym(reqUri),
-    ns.stat('size'),
-    fileInfo.size)
-
-    // resourceGraph.add(resourceGraph.sym(reqUri),
-    // ns.stat('mtime'),
-    // fileInfo.modified)
-
-    resourceGraph.add(resourceGraph.sym(reqUri),
     ns.dct('modified'),
     fileInfo.modified) // An actual datetime value from a Date object
+
+    // Include mtime to satisfy apps which expect this (e.g. users of solid-file-client/src/folderUtils.js/getStats())
+    resourceGraph.add(resourceGraph.sym(reqUri),
+    ns.stat('mtime'),
+    fileInfo.modified)
+
+    resourceGraph.add(resourceGraph.sym(reqUri),
+    ns.stat('size'),
+    fileInfo.size)
 
     if (fileInfo.isFolder) {
       resourceGraph.add(
@@ -3991,6 +4052,7 @@ class SafeServiceLDP extends ServiceInterface {
         path:     docPath,
         docPath:  docPath,// Used by _fileInfoCache() but nothing else
         isFolder: true,
+        mtime: Date.now(),    // TODO this is a hack to please apps that expect this (e.g. users of solid-file-client/src/folderUtils.js)
         modified: Date.now(),    // TODO implement metadata (modified) on SAFE container
         size: 0           // TODO implement metadata (size) on SAFE container
       }
