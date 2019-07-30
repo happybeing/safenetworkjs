@@ -40,19 +40,21 @@ Safe.isBrowser = () => {
 Safe.initUnauthorised = async (appInfo, networkStateCallback, appOptions, argv) =>  {
   // TODO review/update
 
+  let result = null
   try {
     let tmpAppHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
     let connUri = await tmpAppHandle.auth.genConnUri()
-    logApi('SAFEApp was initialise with a read-only session on the SafeNetwork')
-
+    logApi('SAFEApp was initialised with a read-only session on the SafeNetwork')
     Safe._safeAuthUri = await Safe.authorise(connUri)
     logApi('SAFEApp was authorised and authUri received: ', Safe._safeAuthUri)
 
-    return await tmpAppHandle.auth.loginFromUri(Safe._safeAuthUri)
+    result = await tmpAppHandle.auth.loginFromUri(Safe._safeAuthUri)
   } catch (err) {
     logApi('WARNING: ', err)
   }
-  return null
+
+  logApi('returning result: ', result)
+  return result
 }
 
 /**
@@ -71,18 +73,99 @@ Safe.initUnauthorised = async (appInfo, networkStateCallback, appOptions, argv) 
  * @return {Promise} resolves to SAFEApp if successful
  */
 Safe.initAuthorised = async (appInfo, appContainers, networkStateCallback, authOptions, appOptions, argv) => {
+  logApi('Safe.initAuthorised()')
+  let safeApp
+  let authUri
 
   try {
+    logApi('initialising App...')
     let tmpAppHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
-    let authReqUri = await tmpAppHandle.auth.genAuthUri(appContainers, authOptions)
-    Safe._safeAuthUri = await Safe.authorise(authReqUri)
-    logApi('SAFEApp was authorised and authUri received: ', Safe._safeAuthUri)
 
-    return await tmpAppHandle.auth.loginFromUri(Safe._safeAuthUri)
+    // First try init from saved auth URI
+    safeApp = await Safe.initFromSavedUri(appInfo, networkStateCallback, appOptions, tmpAppHandle)
+
+    if (!safeApp) {
+      logApi('Authorising to obtain new authUri...')
+      let authReqUri = await tmpAppHandle.auth.genAuthUri(appContainers, authOptions)
+      authUri = await Safe.authorise(authReqUri)
+      safeApp = await tmpAppHandle.auth.loginFromUri(authUri)
+      if (safeApp) {
+        Safe.saveAuthUri(authUri)
+        logApi('SAFEApp was authorised and authUri obtained: ', authUri)
+      }
+    }
   } catch (err) {
     logApi('WARNING: ', err)
   }
-  return null
+
+  Safe._safeAuthUri = authUri
+  return safeApp
+}
+
+// Try using authUri from browser storage
+// TODO review security implications of storing authUri in browser storage
+
+/**
+ * Attempt authoristation using URI saved in browser storage
+ *
+ * @param  {Object}  SAFE AppInfo
+ * @param  {[type]}  [optional] networkStateCallback
+ * @param  {[type]}  [optional] appOptions
+ * @param  {[type]}  [optional] appHandle
+ * @return {Promise} SAFEApp on success
+ */
+Safe.initFromSavedUri = async (appInfo, networkStateCallback, appOptions, appHandle) => {
+  logApi('Safe.initFromSavedUri()')
+  let safeApp
+  let authUri
+
+  try {
+    logApi('initialising App...')
+    if (!appHandle) appHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
+
+    // Try using stored auth URI
+    authUri = Safe.loadAuthUri()
+    if (authUri) {
+      logApi('Trying stored authUri: ', authUri)
+      safeApp = await appHandle.auth.loginFromUri(authUri)
+      if (safeApp) {
+        logApi('SAFEApp was authorised using stored authUri: ', authUri)
+      } else {
+        Safe.clearAuthUri()
+      }
+    }
+  } catch (err) {
+    logApi('WARNING: ', err)
+  }
+
+  Safe._safeAuthUri = authUri
+  return safeApp
+}
+
+const storageName = 'safeAuthUri'
+
+Safe.saveAuthUri = (authUri) => {
+  try {
+    window.localStorage.setItem(storageName, authUri)
+  } catch(e) {
+    logApi('saveAuthUri() failed to save to browser storage:' + e.message)
+  }
+}
+
+Safe.loadAuthUri = () => {
+  try {
+    return window.localStorage.getItem(storageName)
+  } catch(e) {
+    logApi('loadAuthUri() failed to load from browser storage:' + e.message)
+  }
+}
+
+Safe.clearAuthUri = () => {
+  try {
+    window.localStorage.removeItem(storageName)
+  } catch(e) {
+    logApi('clearAuthUri() failed to clear browser storage:' + e.message)
+  }
 }
 
 /**
