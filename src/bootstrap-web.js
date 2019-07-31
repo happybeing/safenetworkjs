@@ -90,7 +90,7 @@ Safe.initAuthorised = async (appInfo, appContainers, networkStateCallback, authO
       authUri = await Safe.authorise(authReqUri)
       safeApp = await tmpAppHandle.auth.loginFromUri(authUri)
       if (safeApp) {
-        Safe.saveAuthUri(authUri)
+        Safe.saveAuthUri(appInfo.id, authUri)
         logApi('SAFEApp was authorised and authUri obtained: ', authUri)
       }
     }
@@ -124,14 +124,14 @@ Safe.initFromSavedUri = async (appInfo, networkStateCallback, appOptions, appHan
     if (!appHandle) appHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
 
     // Try using stored auth URI
-    authUri = Safe.loadAuthUri()
+    authUri = Safe.loadAuthUri(appInfo.id)
     if (authUri) {
       logApi('Trying stored authUri: ', authUri)
       safeApp = await appHandle.auth.loginFromUri(authUri)
       if (safeApp) {
         logApi('SAFEApp was authorised using stored authUri: ', authUri)
       } else {
-        Safe.clearAuthUri()
+        Safe.clearAuthUri(appInfo.id)
       }
     }
   } catch (err) {
@@ -144,25 +144,27 @@ Safe.initFromSavedUri = async (appInfo, networkStateCallback, appOptions, appHan
 
 const storageName = 'safeAuthUri'
 
-Safe.saveAuthUri = (authUri) => {
+function authUriKey(appId) {return storageName + '-' + appId}
+
+Safe.saveAuthUri = (appId, authUri) => {
   try {
-    window.localStorage.setItem(storageName, authUri)
+    window.localStorage.setItem(authUriKey(appId), authUri)
   } catch(e) {
     logApi('saveAuthUri() failed to save to browser storage:' + e.message)
   }
 }
 
-Safe.loadAuthUri = () => {
+Safe.loadAuthUri = (appId) => {
   try {
-    return window.localStorage.getItem(storageName)
+    return window.localStorage.getItem(authUriKey(appId))
   } catch(e) {
     logApi('loadAuthUri() failed to load from browser storage:' + e.message)
   }
 }
 
-Safe.clearAuthUri = () => {
+Safe.clearAuthUri = (appId) => {
   try {
-    window.localStorage.removeItem(storageName)
+    window.localStorage.removeItem(authUriKey(appId))
   } catch(e) {
     logApi('clearAuthUri() failed to clear browser storage:' + e.message)
   }
