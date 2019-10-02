@@ -403,13 +403,17 @@ const isCacheableResult = containers.isCacheableResult
 const safeUtils = require('./safenetwork-utils')
 
 // Decorated console output
-const debug = require('debug')('safenetworkjs:api')
-const error = require('debug')('safenetworkjs:error')
+const debug = console.log //require('debug')('safenetworkjs:api')
+const error = console.log //require('debug')('safenetworkjs:error')
 
-const logApi = require('debug')('safenetworkjs:web')  // Web API
-const logLdp = require('debug')('safenetworkjs:ldp')  // LDP service
-const logRest = require('debug')('safenetworkjs:rest')  // REST request/response
-const logTest = require('debug')('safenetworkjs:test')  // Test output
+const logApi = console.log //require('debug')('safenetworkjs:web')  // Web API
+todoLogApi = (msg) => {
+  throw Error('TODO: migrate to Fleming APIs (log msg: ' + msg + ')')
+}
+
+const logLdp = console.log //require('debug')('safenetworkjs:ldp')  // LDP service
+const logRest = console.log //require('debug')('safenetworkjs:rest')  // REST request/response
+const logTest = console.log //require('debug')('safenetworkjs:test')  // Test output
 
 let extraDebug = false
 
@@ -533,7 +537,7 @@ const defaultAppContainers = {
 class SafenetworkApi {
 
   constructor (safeApi) {
-    logApi('SafenetworkApi(%o)', safeApi)
+    todoLogApi('SafenetworkApi(%o)', safeApi)
     this.safeApi = safeApi
 
     // Access to SAFE API (DOM or NodeJS)
@@ -573,9 +577,9 @@ class SafenetworkApi {
   // option for apps which don't know about the SAFE API,
   // such as Solid apps which use solid-auth-client (SAFE fork)
   async _initSafeApp () {
-    logApi('initSafeApp()...')
+    todoLogApi('initSafeApp()...')
     if (!this.safeApi) {
-      logApi('FAILED because this.safeApi is ', this.safeApi)
+      todoLogApi('FAILED because this.safeApi is ', this.safeApi)
       return
     }
 
@@ -603,7 +607,7 @@ class SafenetworkApi {
     // Default callback
     if (typeof this._networkStateCallback !== 'function') {
       this._networkStateCallback = (newState) => {
-        logApi('SafeNetwork state changed to: ', newState)
+        todoLogApi('SafeNetwork state changed to: ', newState)
         this._isConnected = newState
       }
     }
@@ -1001,7 +1005,7 @@ class SafenetworkApi {
    * Note: see SAFE API initialiseApp()
    */
   async initUnauthorised (appInfo, appOptions, argv) {
-    logApi('%s.initUnauthorised(%O)...', this.constructor.name, appInfo)
+    todoLogApi('%s.initUnauthorised(%O)...', this.constructor.name, appInfo)
     this._initialAppSettings(appInfo ? appInfo : this.untrustedAppInfo, undefined, appOptions)
     this.setSafeAppHandle(await this.safeApi.initUnauthorised(this._safeAppInfo, this._safeAppOptions, this._networkStateCallback, argv))
 this._isConnected = 'Connected' // TODO this is a hack as the callback is not setting this
@@ -1034,12 +1038,12 @@ this._isConnected = 'Connected' // TODO this is a hack as the callback is not se
    * @return {Promise}
    */
   async initAuthorised (appInfo, appContainers, ownContainer, appOptions, argv) {
-    logApi('%s.initAuthorised(%O, %O, %s, %O, %O)...', this.constructor.name, appInfo, appContainers, ownContainer, appOptions, argv)
+    todoLogApi('%s.initAuthorised(%O, %O, %s, %O, %O)...', this.constructor.name, appInfo, appContainers, ownContainer, appOptions, argv)
     this._initialAppSettings(appInfo, appContainers, appOptions, true /*enableAutoAuth*/)
     let authOptions = (ownContainer ? { own_container: true } : undefined)
-logApi('Calling this.safeApi.initAuthorised()')
+todoLogApi('Calling this.safeApi.initAuthorised()')
     const appHandle = await this.safeApi.initAuthorised(appInfo, appContainers, this._networkStateCallback, authOptions, appOptions, argv)
-logApi('appHandle returned: %o', appHandle)
+todoLogApi('appHandle returned: %o', appHandle)
     return this.setSafeAppHandle(appHandle, true)
   }
 
@@ -1309,7 +1313,7 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns [ValueVersion] for the entry or undefined if entry not present
   async getMutableDataValueVersion (mData, key) {
-    logApi('getMutableDataValueVersion(%s,%s)...', mData, key)
+    todoLogApi('getMutableDataValueVersion(%s,%s)...', mData, key)
     let valueVersion
     try {
       let useKey = await mData.encryptKey(key)
@@ -1322,8 +1326,8 @@ logApi('appHandle returned: %o', appHandle)
       valueVersion.buf = await mData.decrypt(valueVersion.buf)
       return valueVersion
     } catch (err) {
-      logApi(err)
-      logApi("getMutableDataValueVersion() WARNING: no entry found for key '%s'", key)
+      todoLogApi(err)
+      todoLogApi("getMutableDataValueVersion() WARNING: no entry found for key '%s'", key)
       if (err.code !== CONSTANTS.ERROR_CODE.NO_SUCH_ENTRY) throw err
     }
   }
@@ -1354,7 +1358,7 @@ logApi('appHandle returned: %o', appHandle)
       mustNotExist = true
     }
 
-    logApi('setMutableDataValue(%s,%s,%s,%s)...', mData, key, value, mustNotExist)
+    todoLogApi('setMutableDataValue(%s,%s,%s,%s)...', mData, key, value, mustNotExist)
     let entry = null
     try {
       // Check for an existing entry
@@ -1380,10 +1384,10 @@ logApi('appHandle returned: %o', appHandle)
       }
 
       await mData.applyEntriesMutation(mutation)
-      logApi('Mutable Data Entry %s', (mustNotExist ? 'inserted' : 'updated'))
+      todoLogApi('Mutable Data Entry %s', (mustNotExist ? 'inserted' : 'updated'))
       return true
     } catch (err) {
-      logApi('WARNING: unable to set mutable data value: ', err)
+      todoLogApi('WARNING: unable to set mutable data value: ', err)
       throw err
     }
   }
@@ -1408,7 +1412,7 @@ logApi('appHandle returned: %o', appHandle)
    *    - a 'ValueVersion', the value part will be the XOR name of the services entry MD for the public name
    */
   async getPublicNameEntry (publicName) {
-    logApi('getPublicNameEntry(%s)...', publicName)
+    todoLogApi('getPublicNameEntry(%s)...', publicName)
     try {
       // TODO wrap access to some MDs (eg for _publicNames container) in a getter that is passed permissions
       // TODO checks those permissions, gets the MD, and caches the value, or returns it immediately if not null
@@ -1423,7 +1427,7 @@ logApi('appHandle returned: %o', appHandle)
         valueVersion: valueVersion
       }
     } catch (err) {
-      logApi('getPublicNameEntry() WARNING: no _publicNames entry found for: %s', publicName)
+      todoLogApi('getPublicNameEntry() WARNING: no _publicNames entry found for: %s', publicName)
     }
 
     return null
@@ -1454,7 +1458,7 @@ logApi('appHandle returned: %o', appHandle)
   //  - value:        the XOR name of the services MD of the new public name
   //  - serviceValue: the value of the services MD entry for this host (ie [profile.]public-name)
   async createPublicNameAndSetupService (publicName, hostProfile, serviceId) {
-    logApi('createPublicNameAndSetupService(%s,%s,%s)...', publicName, hostProfile, serviceId)
+    todoLogApi('createPublicNameAndSetupService(%s,%s,%s)...', publicName, hostProfile, serviceId)
     let createResult
 
     try {
@@ -1497,11 +1501,11 @@ logApi('appHandle returned: %o', appHandle)
   //  - key:        of the format: '_publicNames/<public-name>'
   //  - value:      the XOR name of the services entry MD for the public name
   async createPublicName (publicName) {
-    logApi('createPublicName(%s)...', publicName)
+    todoLogApi('createPublicName(%s)...', publicName)
     try {
       return this._createPublicName(publicName)
     } catch (err) {
-      logApi('Unable to create public name \'' + publicName + '\': ', err)
+      todoLogApi('Unable to create public name \'' + publicName + '\': ', err)
       throw err
     }
   }
@@ -1516,7 +1520,7 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns   Promise<NameAndTag>: the name and tag values of the newly created MD
   async createNfsContainerMd (defaultContainer, publicName, containerName, mdTagType, isPrivate) {
-    logApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', defaultContainer, publicName, containerName, mdTagType, isPrivate)
+    todoLogApi('createNfsContainerMd(%s,%s,%s,%s,%s)...', defaultContainer, publicName, containerName, mdTagType, isPrivate)
     try {
       let ownerPart = (publicName !== '' ? '/' + publicName : '') // Usually a folder is associated with a service on a public name
       let key = defaultContainer + ownerPart + '/' + containerName
@@ -1556,7 +1560,7 @@ logApi('appHandle returned: %o', appHandle)
 
       return nameAndTag
     } catch (err) {
-      logApi('unable to create public container: ', err)
+      todoLogApi('unable to create public container: ', err)
       throw err
     }
   }
@@ -1574,7 +1578,7 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns   the value of the services MD entry for this host (ie [profile.]public-name)
   async setupServiceOnHost (host, serviceId) {
-    logApi('setupServiceServiceOnHost(%s,%s)...', host, serviceId)
+    todoLogApi('setupServiceServiceOnHost(%s,%s)...', host, serviceId)
     let serviceValue
 
     try {
@@ -1618,7 +1622,7 @@ logApi('appHandle returned: %o', appHandle)
   //  - value:      the XOR name of the services entry MD for the public name
   //  - servicesMd: the handle of the newly created services MD
   async _createPublicName (publicName) {
-    logApi('_createPublicName(%s)...', publicName)
+    todoLogApi('_createPublicName(%s)...', publicName)
     try {
       if (!this.isValidPublicName(publicName)) throw new Error('A public name ' + CONSTANTS.BADPUBLICNAME_MSG)
 
@@ -1639,7 +1643,7 @@ logApi('appHandle returned: %o', appHandle)
       let servicesMd = await this.mutableData.newPublic(servicesMdName, SN_TAGTYPE_SERVICES)
 
       var enc = new TextDecoder()
-      logApi('created services MD with servicesMdName: %s', enc.decode(new Uint8Array(servicesMdName)))
+      todoLogApi('created services MD with servicesMdName: %s', enc.decode(new Uint8Array(servicesMdName)))
 
       let servicesEntries = await this.mutableData.newEntries(this.safeApp)
 
@@ -1656,7 +1660,7 @@ logApi('appHandle returned: %o', appHandle)
 
       // TODO remove (test only):
       let r = await servicesMd.getNameAndTag()
-      logApi('servicesMd created with tag: ', r.typeTag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
+      todoLogApi('servicesMd created with tag: ', r.typeTag, ' and name: ', r.name, ' (%s)', enc.decode(new Uint8Array(r.name)))
 
       let publicNamesMd = await this.auth.getContainer('_publicNames')
       let entryKey = this.makePublicNamesEntryKey(publicName)
@@ -1669,11 +1673,11 @@ logApi('appHandle returned: %o', appHandle)
 
       // TODO remove (test only):
       r = await servicesMd.getNameAndTag()
-      /* logApi('DEBUG new servicesMd created with tag: ', r.typeTag, ' and name: ', r.name)
-      logApi('DEBUG _publicNames entry created for %s', publicName)
-      logApi('DEBUG servicesMd for public name \'%s\' contains...', publicName)
+      /* todoLogApi('DEBUG new servicesMd created with tag: ', r.typeTag, ' and name: ', r.name)
+      todoLogApi('DEBUG _publicNames entry created for %s', publicName)
+      todoLogApi('DEBUG servicesMd for public name \'%s\' contains...', publicName)
       await this.listMd(servicesMd, publicName + ' servicesMd')
-      logApi('DEBUG _publicNames MD contains...')
+      todoLogApi('DEBUG _publicNames MD contains...')
       await this.listMd(publicNamesMd, '_publicNames MD')
       */
 
@@ -1683,7 +1687,7 @@ logApi('appHandle returned: %o', appHandle)
         'servicesMd': servicesMd
       }
     } catch (err) {
-      logApi('_createPublicName() failed: ', err)
+      todoLogApi('_createPublicName() failed: ', err)
       throw err
     }
   }
@@ -1704,11 +1708,11 @@ logApi('appHandle returned: %o', appHandle)
   async mutableDataExists (md) {
     try {
       await md.getVersion(md)
-      logApi('mutableDataExists(%o) TRUE', md)
+      todoLogApi('mutableDataExists(%o) TRUE', md)
       return true
     } catch (err) {
-      logApi(err)
-      logApi('mutableDataExists(%o) FALSE', md)
+      todoLogApi(err)
+      todoLogApi('mutableDataExists(%o) FALSE', md)
       return false  // Error indicates this MD doens't exist on the network
     }
   }
@@ -1732,26 +1736,26 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns promise which resolves to the services MD of the given name
   async getServicesMdFor (host) {
-    logApi('%s.getServicesMdFor(%s)', this.constructor.name, host)
+    todoLogApi('%s.getServicesMdFor(%s)', this.constructor.name, host)
     let publicName = host.split('.')[1]
     try {
       if (publicName === undefined) {
         publicName = host
       }
 
-      logApi("host '%s' has publicName '%s'", host, publicName)
+      todoLogApi("host '%s' has publicName '%s'", host, publicName)
       let servicesName = await this.makeServicesMdName(publicName)
       let md = await this.mutableData.newPublic(servicesName, SN_TAGTYPE_SERVICES)
       if (await this.mutableDataExists(md)) {
         var enc = new TextDecoder()
-        logApi('Look up SUCCESS for MD XOR name: ' + enc.decode(new Uint8Array(servicesName)))
+        todoLogApi('Look up SUCCESS for MD XOR name: ' + enc.decode(new Uint8Array(servicesName)))
         return md
       }
       throw new Error("services Mutable Data not found for public name '" + publicName + "'")
     } catch (err) {
       var enc = new TextDecoder()
-      logApi('Look up FAILED for MD XOR name: ' + enc.decode(new Uint8Array(await this.makeServicesMdName(publicName))))
-      logApi('getServicesMdFor ERROR: ', err)
+      todoLogApi('Look up FAILED for MD XOR name: ' + enc.decode(new Uint8Array(await this.makeServicesMdName(publicName))))
+      todoLogApi('getServicesMdFor ERROR: ', err)
       throw err
     }
   }
@@ -1765,33 +1769,33 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns promise which resolves to the services MD of the given name, or null
   async getServicesMdFromContainers (host) {
-    logApi('getServicesMdFromContainers(%s)', host)
+    todoLogApi('getServicesMdFromContainers(%s)', host)
     try {
       let publicName = host.split('.')[1]
       if (publicName === undefined) {
         publicName = host
       }
-      logApi("host '%s' has publicName '%s'", host, publicName)
+      todoLogApi("host '%s' has publicName '%s'", host, publicName)
 
       let nameKey = this.makePublicNamesEntryKey(publicName)
       let md = await this.auth.getContainer('_publicNames')
-      logApi('_publicNames ----------- start ----------------')
+      todoLogApi('_publicNames ----------- start ----------------')
       let entries = await md.getEntries()
       let entriesList = await entries.listEntries()
       await entriesList.forEach((k, v) => {
-        logApi('Key: ', entry.key.toString())
-        logApi('Value: ', entry.value.buf.toString())
-        logApi('Version: ', entry.value.version)
+        todoLogApi('Key: ', entry.key.toString())
+        todoLogApi('Value: ', entry.value.buf.toString())
+        todoLogApi('Version: ', entry.value.version)
         if (k === nameKey) {
-          logApi('Key: ' + nameKey + '- found')
+          todoLogApi('Key: ' + nameKey + '- found')
           return entry.value.buf
         }
       })
-      logApi('Key: ' + nameKey + '- NOT found')
-      logApi("getServicesMdFromContainers() - WARNING: No _publicNames entry for '%s'", publicName)
+      todoLogApi('Key: ' + nameKey + '- NOT found')
+      todoLogApi("getServicesMdFromContainers() - WARNING: No _publicNames entry for '%s'", publicName)
       return null
     } catch (err) {
-      logApi('getServicesMdFromContainers() ERROR: ', err)
+      todoLogApi('getServicesMdFromContainers() ERROR: ', err)
       throw err
     }
   }
@@ -1885,7 +1889,7 @@ logApi('appHandle returned: %o', appHandle)
    * @return {Promise} a ServiceInterface which supports fetch(). or undefined
    */
   async getServiceForUri (uri) {
-    logApi('getServiceForUri(%s)...', uri)
+    todoLogApi('getServiceForUri(%s)...', uri)
 
     // Temp solution that supports SAFE experimental API and
     // supports Solid apps by providing LDP service on everything!
@@ -1905,7 +1909,7 @@ logApi('appHandle returned: %o', appHandle)
         publicName = host
         uriProfile = 'www'
       }
-      logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+      todoLogApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
@@ -1913,17 +1917,17 @@ logApi('appHandle returned: %o', appHandle)
       let matchedServiceValue  // Used when setting up default service on www container
 
       let entries = await servicesMd.getEntries()
-      logApi("checking servicesMd entries for host '%s'", host)
+      todoLogApi("checking servicesMd entries for host '%s'", host)
       this.hostedService = null
       let entriesList = await entries.listEntries()
       await entriesList.forEach(async (entry) => {
         listingQ.push(new Promise(async (resolve, reject) => {
-          logApi('Key: ', entry.key.toString())
-          logApi('Value: ', entry.value.buf.toString())
-          logApi('Version: ', entry.value.version)
+          todoLogApi('Key: ', entry.key.toString())
+          todoLogApi('Value: ', entry.value.buf.toString())
+          todoLogApi('Version: ', entry.value.version)
           let serviceKey = entry.key.toString()
           if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-            logApi('Skipping metadata entry: ', serviceKey)
+            todoLogApi('Skipping metadata entry: ', serviceKey)
             resolve()
             return  // Skip
           }
@@ -1941,20 +1945,20 @@ logApi('appHandle returned: %o', appHandle)
           }
 
           let serviceValue = entry.value
-          logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+          todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
           if (serviceProfile === uriProfile && !newHostedService) {
             let serviceFound = this._availableServices.get(serviceId)
             if (serviceFound) {
               // Use the installed service to enable the service on this host
               let newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
               this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
-              logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+              todoLogApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
               this.hostedService = newHostedService
             } else {
               // Save www container if the uriProfile is for a www service
               if (serviceId === 'www' ) matchedServiceValue = serviceValue
 
-              logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+              todoLogApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
             }
           }
           resolve() // Done
@@ -1973,17 +1977,17 @@ logApi('appHandle returned: %o', appHandle)
       //     // Use the installed service to enable the service on this host
       //     let newHostedService = await serviceFound.makeServiceInstance(host, matchedServiceValue)
       //     this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
-      //     logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+      //     todoLogApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
       //     this.hostedService = newHostedService
       //   }
       // }
 
       if (!this.hostedService) {
-        logApi("WARNING: no service setup for host '" + host + "'")
+        todoLogApi("WARNING: no service setup for host '" + host + "'")
       }
       return this.hostedService
     } catch (err) {
-      logApi('getServiceForUri(%s) FAILED: %s', uri, err)
+      todoLogApi('getServiceForUri(%s) FAILED: %s', uri, err)
       return null
     } finally {
       // TODO implement memory freeing stuff using 'finally' throughout the code!
@@ -1993,7 +1997,7 @@ logApi('appHandle returned: %o', appHandle)
   // Version for use with experimental RDF API (subNamesContainer using RDF)
   // (experimental SAFE API used by WebID Manager PoC)
   async exGetServiceForUri (uri) {
-    logApi('exGetServiceForUri(%s)...', uri)
+    todoLogApi('exGetServiceForUri(%s)...', uri)
     try {
       let host = hostpart(uri)
       let service = await this._activeServices.get(host)
@@ -2008,7 +2012,7 @@ logApi('appHandle returned: %o', appHandle)
         publicName = host
         uriProfile = 'www'
       }
-      logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+      todoLogApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
 
       // TODO support multiple service types per service URI (see safe_app_nodejs issue #377)
       //
@@ -2022,7 +2026,7 @@ logApi('appHandle returned: %o', appHandle)
       let serviceContainer = await this.exGetContainerFromPublicId(publicName, uriProfile)
       if (serviceContainer.type === CONSTANTS.DATA_TYPE_RDF) {
         // TODO support RDF containers (requires all of SafenetworkJS to support them!)
-        logApi("WARNING: RDF based services not yet supported - no service available.")
+        todoLogApi("WARNING: RDF based services not yet supported - no service available.")
         return undefined // Skip RDF containers
       } else if (serviceContainer.type === CONSTANTS.DATA_TYPE_NFS) {
         let serviceId = SN_SERVICEID_LDP
@@ -2032,30 +2036,30 @@ logApi('appHandle returned: %o', appHandle)
           let newHostedService = await ldpService.makeServiceInstance(host, serviceValue) // serviceValue is undefined so we hack...
           this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
           newHostedService._storageMd = serviceContainer // Hack to set container MD
-          logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+          todoLogApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
           return newHostedService
         } else {
-          logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+          todoLogApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
         }
       }
-      // logApi('Unknown container type for: %o', serviceContainer)
+      // todoLogApi('Unknown container type for: %o', serviceContainer)
       throw Error('rdfGetServiceForUri() ERROR - Unknown container type: ', serviceContainer.type)
 
       // Get the services MD for publicName
       let servicesMd = await this.getServicesMdFor(publicName)
       let listingQ = []
       let entries = await servicesMd.getEntries()
-      logApi("checking servicesMd entries for host '%s'", host)
+      todoLogApi("checking servicesMd entries for host '%s'", host)
       this.hostedService = null
       let entriesList = await entries.listEntries()
       await entriesList.forEach(async (entry) => {
         listingQ.push(new Promise(async (resolve, reject) => {
-          logApi('Key: ', entry.key.toString())
-          logApi('Value: ', entry.value.buf.toString())
-          logApi('Version: ', entry.value.version)
+          todoLogApi('Key: ', entry.key.toString())
+          todoLogApi('Value: ', entry.value.buf.toString())
+          todoLogApi('Version: ', entry.value.version)
           let serviceKey = entry.key.toString()
           if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-            logApi('Skipping metadata entry: ', serviceKey)
+            todoLogApi('Skipping metadata entry: ', serviceKey)
             resolve()
             return  // Skip
           }
@@ -2073,17 +2077,17 @@ logApi('appHandle returned: %o', appHandle)
           }
 
           let serviceValue = entry.value
-          logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+          todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
           if (serviceProfile === uriProfile) {
             let serviceFound = this._availableServices.get(serviceId)
             if (serviceFound) {
               // Use the installed service to enable the service on this host
               let newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
               this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
-              logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+              todoLogApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
               this.hostedService = newHostedService
             } else {
-              logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+              todoLogApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
             }
           }
           resolve() // Done
@@ -2092,11 +2096,11 @@ logApi('appHandle returned: %o', appHandle)
       await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
       if (!this.hostedService) {
-        logApi("WARNING: no service setup for host '" + host + "'")
+        todoLogApi("WARNING: no service setup for host '" + host + "'")
       }
       return this.hostedService
     } catch (err) {
-      logApi('getServiceForUri(%s) FAILED: %s', uri, err)
+      todoLogApi('getServiceForUri(%s) FAILED: %s', uri, err)
       return null
     } finally {
       // TODO implement memory freeing stuff using 'finally' throughout the code!
@@ -2104,7 +2108,7 @@ logApi('appHandle returned: %o', appHandle)
   }
 
   async NEW_getServiceForUri (uri) {
-    logApi('getServiceForUri(%s)...', uri)
+    todoLogApi('getServiceForUri(%s)...', uri)
     try {
       let host = hostpart(uri)
       let service = await this._activeServices.get(host)
@@ -2133,18 +2137,18 @@ logApi('appHandle returned: %o', appHandle)
           // Use the installed service to enable the service on this host
           newHostedService = await serviceFound.makeServiceInstance(host, serviceValue)
           this.setActiveService(host, newHostedService) // Cache the instance for subsequent uses
-          logApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
+          todoLogApi('Service activated - %s (serviceName: %s, serviceId: %s)', newHostedService.getDescription(), newHostedService.getName(), newHostedService.getIdString())
         } else {
-          logApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
+          todoLogApi("WARNING: service '" + serviceId + "' is setup on '" + host + "' but no implementation is available")
         }
       }
 
       if (!newHostedService) {
-        logApi("WARNING: no service setup for host '" + host + "'")
+        todoLogApi("WARNING: no service setup for host '" + host + "'")
       }
       return newHostedService
     } catch (err) {
-      logApi('getServiceForUri(%s) FAILED: %s', uri, err)
+      todoLogApi('getServiceForUri(%s) FAILED: %s', uri, err)
       return null
     }
   }
@@ -2159,7 +2163,7 @@ logApi('appHandle returned: %o', appHandle)
    * @return {Promise}      map of service names to service value, on the subName
    */
   async getMatchingServices (host) {
-    logApi('getMatchingServices(%s)...', host)
+    todoLogApi('getMatchingServices(%s)...', host)
     // Look up the service on this host: profile.public-name
     let uriProfile = host.split('.')[0]
     let publicName = host.split('.')[1]
@@ -2167,23 +2171,23 @@ logApi('appHandle returned: %o', appHandle)
       publicName = host
       uriProfile = 'www'
     }
-    logApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
+    todoLogApi("URI has profile '%s' and publicName '%s'", uriProfile, publicName)
 
     // Get the services MD for publicName
     let servicesMd = await this.getServicesMdFor(publicName)
     let listingQ = []
     let servicesMap = []
     let entries = await servicesMd.getEntries()
-    logApi("checking servicesMd entries for host '%s'", host)
+    todoLogApi("checking servicesMd entries for host '%s'", host)
     let entriesList = await entries.listEntries()
     await entriesList.forEach(async (entry) => {
       listingQ.push(new Promise(async (resolve, reject) => {
-        logApi('Key: ', entry.key.toString())
-        logApi('Value: ', entry.value.buf.toString())
-        logApi('Version: ', entry.value.version)
+        todoLogApi('Key: ', entry.key.toString())
+        todoLogApi('Value: ', entry.value.buf.toString())
+        todoLogApi('Version: ', entry.value.version)
         let serviceKey = entry.key.toString()
         if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-          logApi('Skipping metadata entry: ', serviceKey)
+          todoLogApi('Skipping metadata entry: ', serviceKey)
           resolve()
           return  // Skip
         }
@@ -2201,7 +2205,7 @@ logApi('appHandle returned: %o', appHandle)
         }
 
         let serviceValue = entry.value
-        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
         if (serviceProfile === uriProfile) {
           servicesMap.push({ serviceId: serviceValue })
         }
@@ -2210,7 +2214,7 @@ logApi('appHandle returned: %o', appHandle)
     })
     await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
-    logApi('servicesMap: %O', servicesMap)
+    todoLogApi('servicesMap: %O', servicesMap)
     return servicesMap
   }
 
@@ -2225,20 +2229,20 @@ logApi('appHandle returned: %o', appHandle)
    * @return {Promise}      map of service names to service value, on the subName
    */
   async getMatchingServicesFromMd (servicesMd, subName) {
-    logApi('getMatchingServicesFromMd(%o)...', servicesMd)
+    todoLogApi('getMatchingServicesFromMd(%o)...', servicesMd)
     let listingQ = []
     let servicesMap = []
     let entries = await servicesMd.getEntries()
-    logApi("checking servicesMd entries for host '%s'", host)
+    todoLogApi("checking servicesMd entries for host '%s'", host)
     let entriesList = await entries.listEntries()
     await entriesList.forEach(async (entry) => {
       listingQ.push(new Promise(async (resolve, reject) => {
-        logApi('Key: ', entry.key.toString())
-        logApi('Value: ', entry.value.buf.toString())
-        logApi('Version: ', entry.value.version)
+        todoLogApi('Key: ', entry.key.toString())
+        todoLogApi('Value: ', entry.value.buf.toString())
+        todoLogApi('Version: ', entry.value.version)
         let serviceKey = entry.key.toString()
         if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-          logApi('Skipping metadata entry: ', serviceKey)
+          todoLogApi('Skipping metadata entry: ', serviceKey)
           resolve()
           return  // Skip
         }
@@ -2256,7 +2260,7 @@ logApi('appHandle returned: %o', appHandle)
         }
 
         let serviceValue = entry.value
-        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
         if (serviceProfile === subName) {
           servicesMap.push({ serviceId: serviceValue })
         }
@@ -2265,7 +2269,7 @@ logApi('appHandle returned: %o', appHandle)
     })
     await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
-    logApi('servicesMap: %O', servicesMap)
+    todoLogApi('servicesMap: %O', servicesMap)
     return servicesMap
   }
 
@@ -2279,7 +2283,7 @@ logApi('appHandle returned: %o', appHandle)
    * @return {Promise}      map of service names to service value, on the subName
    */
   async rdfGetMatchingServices (host) {
-    logApi('rdfGetMatchingServices(%s)...', host)
+    todoLogApi('rdfGetMatchingServices(%s)...', host)
     let parsedUrl = parseUrl(uri);
     if (!parsedUrl.protocol) parsedUrl = parseUrl('safe://' + host)
     const hostParts = parsedUrl.hostname.split('.')
@@ -2288,7 +2292,7 @@ logApi('appHandle returned: %o', appHandle)
     if (subName === undefined) subName = 'www'
 
     // Look up the service on this host: subName.public-name
-    logApi("URI has subName '%s' and publicName '%s'", subName, publicName)
+    todoLogApi("URI has subName '%s' and publicName '%s'", subName, publicName)
 
     let subNamesContainer = await this.getServicesMdFor(publicName)
 
@@ -2323,16 +2327,16 @@ logApi('appHandle returned: %o', appHandle)
 
     let listingQ = []
     let entries = await servicesMd.getEntries()
-    logApi("checking servicesMd entries for host '%s'", host)
+    todoLogApi("checking servicesMd entries for host '%s'", host)
     let entriesList = await entries.listEntries()
     await entriesList.forEach(async (entry) => {
       listingQ.push(new Promise(async (resolve, reject) => {
-        logApi('Key: ', entry.key.toString())
-        logApi('Value: ', entry.value.buf.toString())
-        logApi('Version: ', entry.value.version)
+        todoLogApi('Key: ', entry.key.toString())
+        todoLogApi('Value: ', entry.value.buf.toString())
+        todoLogApi('Version: ', entry.value.version)
         let serviceKey = entry.key.toString()
         if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-          logApi('Skipping metadata entry: ', serviceKey)
+          todoLogApi('Skipping metadata entry: ', serviceKey)
           resolve()
           return  // Skip
         }
@@ -2350,7 +2354,7 @@ logApi('appHandle returned: %o', appHandle)
         }
 
         let serviceValue = entry.value
-        logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+        todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
         if (serviceProfile === uriProfile) {
           servicesMap.push({ serviceId: serviceValue })
         }
@@ -2359,7 +2363,7 @@ logApi('appHandle returned: %o', appHandle)
     })
     await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
 
-    logApi('servicesMap: %O', servicesMap)
+    todoLogApi('servicesMap: %O', servicesMap)
     return servicesMap
   }
 
@@ -2377,20 +2381,20 @@ logApi('appHandle returned: %o', appHandle)
   //
   //   ??? modify this to access RDF emulation of serviceMd - see exReadPublicIdAsRdf() below
   //
-  //   logApi('getMatchingServicesFromMd(%o)...', servicesMd)
+  //   todoLogApi('getMatchingServicesFromMd(%o)...', servicesMd)
   //   let listingQ = []
   //   let servicesMap = []
   //   let entries = await servicesMd.getEntries()
-  //   logApi("checking servicesMd entries for host '%s'", host)
+  //   todoLogApi("checking servicesMd entries for host '%s'", host)
   //   let entriesList = await entries.listEntries()
   //   await entriesList.forEach(async (entry) => {
   //     listingQ.push(new Promise(async (resolve, reject) => {
-  //       logApi('Key: ', entry.key.toString())
-  //       logApi('Value: ', entry.value.buf.toString())
-  //       logApi('Version: ', entry.value.version)
+  //       todoLogApi('Key: ', entry.key.toString())
+  //       todoLogApi('Value: ', entry.value.buf.toString())
+  //       todoLogApi('Version: ', entry.value.version)
   //       let serviceKey = entry.key.toString()
   //       if (serviceKey === CONSTANTS.MD_METADATA_KEY) {
-  //         logApi('Skipping metadata entry: ', serviceKey)
+  //         todoLogApi('Skipping metadata entry: ', serviceKey)
   //         resolve()
   //         return  // Skip
   //       }
@@ -2408,7 +2412,7 @@ logApi('appHandle returned: %o', appHandle)
   //       }
   //
   //       let serviceValue = entry.value
-  //       logApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
+  //       todoLogApi("checking: serviceProfile '%s' has serviceId '%s'", serviceProfile, serviceId)
   //       if (serviceProfile === subName) {
   //         servicesMap.push({ serviceId: serviceValue })
   //       }
@@ -2417,7 +2421,7 @@ logApi('appHandle returned: %o', appHandle)
   //   })
   //   await Promise.all(listingQ).catch((e) => error(e))  // Wait until all entries processed
   //
-  //   logApi('servicesMap: %O', servicesMap)
+  //   todoLogApi('servicesMap: %O', servicesMap)
   //   return servicesMap
   // }
 
@@ -2440,7 +2444,7 @@ logApi('appHandle returned: %o', appHandle)
    * @return {MutableData, String}  Promise {servicesMd, DATA_TYPE_RDF}
    */
   async exReadPublicIdAsRdf(subNamesContainer, pubName, subName) {
-    logApi('exReadPublicIdAsRdf(%o, %s, %s)', subNamesContainer, pubName, subName)
+    todoLogApi('exReadPublicIdAsRdf(%o, %s, %s)', subNamesContainer, pubName, subName)
     let serviceMd;
     try {
       const graphId = `safe://${subName}.${pubName}`;
@@ -2469,13 +2473,13 @@ logApi('appHandle returned: %o', appHandle)
    * @return {MutableData, String}  Promise {servicesMd, DATA_TYPE_NFS|DATA_TYPE_RDF}
    */
   async exGetContainerFromPublicId(pubName, subName) {
-    logApi('exGetContainerFromPublicId(%s, %s)', pubName, subName)
+    todoLogApi('exGetContainerFromPublicId(%s, %s)', pubName, subName)
     let serviceInfo;
     let subNamesContainer;
     try {
       const address = await this.crypto.sha3Hash(pubName);
       subNamesContainer = await this.safeApp.mutableData.newPublic(address, consts.TAG_TYPE_DNS);
-      logApi('subNamesContainer: %o', subNamesContainer)
+      todoLogApi('subNamesContainer: %o', subNamesContainer)
       serviceInfo = await subNamesContainer.get(subName || 'www'); // default it to www
     } catch (err) {
       switch (err.code) {
@@ -2531,11 +2535,11 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns a promise which resolves to an MD handle
   async getMdFromHash (hash, tagType) {
-    logApi('getMdFromHash(%s,%s)...', hash, tagType)
+    todoLogApi('getMdFromHash(%s,%s)...', hash, tagType)
     try {
       return this.mutableData.newPublic(hash, tagType)
     } catch (err) {
-      logApi('getMdFromHash() ERROR: %s', err)
+      todoLogApi('getMdFromHash() ERROR: %s', err)
       throw err
     }
   }
@@ -2550,7 +2554,7 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns the XOR name as a String, for the services MD unique to the given public name
   async makeServicesMdName (publicName) {
-    logApi('makeServicesMdName(%s)', publicName)
+    todoLogApi('makeServicesMdName(%s)', publicName)
     return this.crypto.sha3Hash(publicName)
   }
 
@@ -2646,7 +2650,7 @@ logApi('appHandle returned: %o', appHandle)
   // @returns null if not handled, or a {Promise<Object} on handling a safe: URI
   //
   async fetch (docUri, options) {
-    logApi('%s.fetch(%s,%o)...', this.constructor.name, docUri, options)
+    todoLogApi('%s.fetch(%s,%o)...', this.constructor.name, docUri, options)
     await this._initSafeApp()  // Ensure SAFE App is initialised
 
     let allowAuthOn401 = false // TODO reinstate: true
@@ -2661,7 +2665,7 @@ logApi('appHandle returned: %o', appHandle)
           return this._fetch(docUri, options)
         }
       } catch (err) {
-        logApi('WARNING: ' + err)
+        todoLogApi('WARNING: ' + err)
         throw err
       }
     }
@@ -2673,7 +2677,7 @@ logApi('appHandle returned: %o', appHandle)
   //
   // @returns see window.fetch() and your services specification
   async _fetch (docUri, options) {
-    logApi('%s._fetch(%s,%o)', this.constructor.name, docUri, options)
+    todoLogApi('%s._fetch(%s,%o)', this.constructor.name, docUri, options)
 
     let response
     options = options || {}
@@ -2695,33 +2699,33 @@ logApi('appHandle returned: %o', appHandle)
         logRest('    response: %s %s', response.status, response.statusText)
       }
     } catch (err) {
-      logApi('%s._fetch() error: %s', this.constructor.name, err)
+      todoLogApi('%s._fetch() error: %s', this.constructor.name, err)
     }
 
     // Since SAFE webFetch() doesn't work in mock, we first try window.fetch()
     if (!response && this.safeApp.appIsMock() && docUri.indexOf('safe://') !== 0) {
-      logApi('%s._fetch() - no service available, try window.fetch()...', this.constructor.name)
+      todoLogApi('%s._fetch() - no service available, try window.fetch()...', this.constructor.name)
 
       try {
         response = await window.fetch(docUri, options)
       } catch (err) {
-        logApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
+        todoLogApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
         response = new Response(null, {status: 500, statusText: 'Unknown error'})
       }
     }
 
     if (!response) {
-      logApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
+      todoLogApi('%s._fetch() - no service available, defaulting to webFetch()...', this.constructor.name)
 
       try {
         response = this._convertWebFetchResponse(await this.safeApp.webFetch(docUri, options))
       } catch (err) {
-        logApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
+        todoLogApi('%s._fetch() error: %s (%o)', this.constructor.name, err, err)
         response = new Response(null, {status: 500, statusText: 'Unknown error'})
       }
     }
 
-    logApi('response: %o', response)
+    todoLogApi('response: %o', response)
     return response
   }
 
@@ -2732,8 +2736,8 @@ logApi('appHandle returned: %o', appHandle)
         statusText: wfr.statusText,
         headers: new Headers(wfr.headers)
       })
-      logApi('webFetch response: %o', wfr)
-      logApi('webFetch converted response: %o', response)
+      todoLogApi('webFetch response: %o', wfr)
+      todoLogApi('webFetch converted response: %o', response)
       return response
   }
 
@@ -2923,7 +2927,7 @@ class ServiceInterface {
     }
 
     // Default handler when service does not provide one
-    logApi('WARNING: \'%s\' not implemented for %s service (returning 405)', method, this.getName())
+    todoLogApi('WARNING: \'%s\' not implemented for %s service (returning 405)', method, this.getName())
     return async function () {
       return new Response(null, {ok: false, status: 405, statusText: 'Method Not Allowed'})
     }
@@ -2940,7 +2944,7 @@ class ServiceInterface {
   //
   // @returns a promise which resolves to the services entry value for this service
   async setupServiceForHost (host, servicesMd) {
-    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
+    todoLogApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
     throw new Error('ServiceInterface.setupServiceForHost() not implemented for ' + this.getName() + ' service')
     /* Example:
     TODO
@@ -2954,7 +2958,7 @@ class ServiceInterface {
   //
   // @returns a promise which resolves to a new instance of this service for the given host
   async makeServiceInstance (host, serviceValue) {
-    logApi('%s.makeServiceInstance(%s,%s) - NOT YET IMPLEMENTED', this.constructor.name, host, serviceValue)
+    todoLogApi('%s.makeServiceInstance(%s,%s) - NOT YET IMPLEMENTED', this.constructor.name, host, serviceValue)
     throw ('%s.makeServiceInstance() not implemented for ' + this.getName() + ' service', this.constructor.name)
     /* Example:
     let hostService = await new this.constructor(this.safeJs)
@@ -2978,7 +2982,7 @@ class ServiceInterface {
   //
   // @returns see window.fetch() and your services specification
   async _fetch () {
-    logApi('%s._fetch() - NOT YET IMPLEMENTED', this.constructor.name)
+    todoLogApi('%s._fetch() - NOT YET IMPLEMENTED', this.constructor.name)
     throw new Error('ServiceInterface._fetch() not implemented for ' + this.getName() + ' service')
   }
 };
@@ -3029,7 +3033,7 @@ class SafeServiceWww extends ServiceInterface {
     // and so a www service must be set up using another application such as
     // the Maidsafe Web Hosting Manager example. This can't be done here
     // because the user must specify a name for a public container.
-    logApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
+    todoLogApi('%s.setupServiceForHost(%s,%o) - NOT YET IMPLEMENTED', this.constructor.name, host, servicesMd)
     throw ('%s.setupServiceForHost() not implemented for ' + this.getName() + ' service', this.constructor.name)
 
     /* Example:
@@ -3058,7 +3062,7 @@ class SafeServiceWww extends ServiceInterface {
   //
   // @returns see window.fetch() and your services specification
   async _fetch () {
-    logApi('%s._fetch(%o) calling this.safeApp.webFetch()', this.constructor.name, arguments)
+    todoLogApi('%s._fetch(%o) calling this.safeApp.webFetch()', this.constructor.name, arguments)
     return this.safeApp.webFetch.apply(null, arguments)
   }
 }
@@ -3610,7 +3614,7 @@ class SafeServiceLDP extends ServiceInterface {
         logLdp('fetched nfsFile: %o', nfsFile)
         fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
       } catch (err) {
-        logApi(err)
+        todoLogApi(err)
         return new Response(null, {status: 404, statusText: 'File not found'})
       }
       fileInfo.openHandle = await (await this.storageNfs()).open(nfsFile, this.safeJs.safeApi.CONSTANTS.NFS_FILE_MODE_READ)
@@ -4100,7 +4104,7 @@ class SafeServiceLDP extends ServiceInterface {
         return null
       }
     } catch (err) {
-      logApi('_getFileInfo(%s) FAILED: %s', docPath, err)
+      todoLogApi('_getFileInfo(%s) FAILED: %s', docPath, err)
       throw err
     }
   }
