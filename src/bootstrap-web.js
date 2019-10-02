@@ -6,14 +6,19 @@
  * access to a shared Mutable Data.
  */
 
-const logApi = require('debug')('safenetworkjs:web')  // Web API
-const Safe = window.safe
+const logApi = console.log //require('debug')('safenetworkjs:web')
+todoLogApi = (msg) => {
+  throw Error('TODO: migrate to Fleming APIs (log msg: ' + msg + ')')
+}
+
+// Web API
+const safe = new window.Safe
 
 /**
  * Detect browser environment
  * @return {Boolean} true if running in the browser
  */
-Safe.isBrowser = () => {
+safe.isBrowser = () => {
   return window && (this === window)
 }
 
@@ -37,23 +42,23 @@ Safe.isBrowser = () => {
  *
  * Note: see SAFE API initialiseApp()
  */
-Safe.initUnauthorised = async (appInfo, networkStateCallback, appOptions, argv) =>  {
+safe.initUnauthorised = async (appInfo, networkStateCallback, appOptions, argv) =>  {
   // TODO review/update
 
   let result = null
   try {
-    let tmpAppHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
+    let tmpAppHandle = await safe.initialiseApp(appInfo, networkStateCallback, appOptions)
     let connUri = await tmpAppHandle.auth.genConnUri()
-    logApi('SAFEApp was initialised with a read-only session on the SafeNetwork')
-    Safe._safeAuthUri = await Safe.authorise(connUri)
-    logApi('SAFEApp was authorised and authUri received: ', Safe._safeAuthUri)
+    todoLogApi('SAFEApp was initialised with a read-only session on the SafeNetwork')
+    safe._safeAuthUri = await safe.authorise(connUri)
+    todoLogApi('SAFEApp was authorised and authUri received: ', safe._safeAuthUri)
 
-    result = await tmpAppHandle.auth.loginFromUri(Safe._safeAuthUri)
+    result = await tmpAppHandle.auth.loginFromUri(safe._safeAuthUri)
   } catch (err) {
-    logApi('WARNING: ', err)
+    todoLogApi('WARNING: ', err)
   }
 
-  logApi('returning result: ', result)
+  todoLogApi('returning result: ', result)
   return result
 }
 
@@ -72,33 +77,59 @@ Safe.initUnauthorised = async (appInfo, networkStateCallback, appOptions, argv) 
  * @param  {Object}  argv [optional] required only for command lin authorisation
  * @return {Promise} resolves to SAFEApp if successful
  */
-Safe.initAuthorised = async (appInfo, appContainers, networkStateCallback, authOptions, appOptions, argv) => {
-  logApi('Safe.initAuthorised()')
+// TODO: update parameters for Fleming API
+safe.initAuthorised = async (appInfo, appContainers, networkStateCallback, authOptions, appOptions, argv) => {
+  logApi('safe.initAuthorised()')
   let safeApp
   let authUri
 
+  let auth_credentials
   try {
+    // TODO: First try init from saved credentials
+    // safeApp = await safe.initFromSavedCredentials(appInfo, networkStateCallback, appOptions, tmpAppHandle)
+
     logApi('initialising App...')
-    let tmpAppHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
+    auth_credentials = safe.auth_app(appInfo.id, appInfo.name, appInfo.vendor);
 
-    // First try init from saved auth URI
-    safeApp = await Safe.initFromSavedUri(appInfo, networkStateCallback, appOptions, tmpAppHandle)
-
-    if (!safeApp) {
-      logApi('Authorising to obtain new authUri...')
-      let authReqUri = await tmpAppHandle.auth.genAuthUri(appContainers, authOptions)
-      authUri = await Safe.authorise(authReqUri)
-      safeApp = await tmpAppHandle.auth.loginFromUri(authUri)
-      if (safeApp) {
-        Safe.saveAuthUri(appInfo.id, authUri)
-        logApi('SAFEApp was authorised and authUri obtained: ', authUri)
-      }
-    }
+    logApi("connecting to the Network...");
+    let result = safe.connect("net.maidsafe.safe_nodejs", auth_credentials);
   } catch (err) {
     logApi('WARNING: ', err)
   }
 
-  Safe._safeAuthUri = authUri
+  safe._safeCredentials = auth_credentials
+  logApi('returning safe API: ', safe)
+  return safe
+}
+
+safe.OLD_initAuthorised = async (appInfo, appContainers, networkStateCallback, authOptions, appOptions, argv) => {
+  todoLogApi('safe.OLD_initAuthorised()')
+  let safeApp
+  let authUri
+
+  try {
+    todoLogApi('initialising App...')
+    let tmpAppHandle = await safe.initialiseApp(appInfo, networkStateCallback, appOptions)
+
+    // First try init from saved auth URI
+    safeApp = await safe.initFromSavedUri(appInfo, networkStateCallback, appOptions, tmpAppHandle)
+
+    if (!safeApp) {
+      todoLogApi('Authorising to obtain new authUri...')
+      let authReqUri = await tmpAppHandle.auth.genAuthUri(appContainers, authOptions)
+      authUri = await safe.authorise(authReqUri)
+      safeApp = await tmpAppHandle.auth.loginFromUri(authUri)
+      if (safeApp) {
+        safe.saveAuthUri(appInfo.id, authUri)
+        todoLogApi('SAFEApp was authorised and authUri obtained: ', authUri)
+      }
+    }
+  } catch (err) {
+    todoLogApi('WARNING: ', err)
+  }
+
+  safe._safeAuthUri = authUri
+  todoLogApi('returning app: ', safeApp)
   return safeApp
 }
 
@@ -114,31 +145,33 @@ Safe.initAuthorised = async (appInfo, appContainers, networkStateCallback, authO
  * @param  {[type]}  [optional] appHandle
  * @return {Promise} SAFEApp on success
  */
-Safe.initFromSavedUri = async (appInfo, networkStateCallback, appOptions, appHandle) => {
-  logApi('Safe.initFromSavedUri()')
+safe.initFromSavedUri = async (appInfo, networkStateCallback, appOptions, appHandle) => {
+  todoLogApi('safe.initFromSavedUri()')
   let safeApp
   let authUri
 
   try {
-    logApi('initialising App...')
-    if (!appHandle) appHandle = await Safe.initialiseApp(appInfo, networkStateCallback, appOptions)
+    todoLogApi('initialising App...')
+    if (!appHandle) appHandle = await safe.initialiseApp(appInfo, networkStateCallback, appOptions)
 
     // Try using stored auth URI
-    authUri = Safe.loadAuthUri(appInfo.id)
+    authUri = safe.loadAuthUri(appInfo.id)
     if (authUri) {
-      logApi('Trying stored authUri: ', authUri)
+      todoLogApi('Trying stored authUri: ', authUri)
       safeApp = await appHandle.auth.loginFromUri(authUri)
       if (safeApp) {
-        logApi('SAFEApp was authorised using stored authUri: ', authUri)
+        todoLogApi('SAFEApp was authorised using stored authUri: ', authUri)
       } else {
-        Safe.clearAuthUri(appInfo.id)
+        safe.clearAuthUri(appInfo.id)
       }
     }
   } catch (err) {
-    logApi('WARNING: ', err)
+    todoLogApi('WARNING: ', err)
   }
 
-  Safe._safeAuthUri = authUri
+  safe._safeAuthUri = authUri
+
+  todoLogApi('returning: ', safeApp)
   return safeApp
 }
 
@@ -146,27 +179,27 @@ const storageName = 'safeAuthUri'
 
 function authUriKey(appId) {return storageName + '-' + appId}
 
-Safe.saveAuthUri = (appId, authUri) => {
+safe.saveAuthUri = (appId, authUri) => {
   try {
     window.localStorage.setItem(authUriKey(appId), authUri)
   } catch(e) {
-    logApi('saveAuthUri() failed to save to browser storage:' + e.message)
+    todoLogApi('saveAuthUri() failed to save to browser storage:' + e.message)
   }
 }
 
-Safe.loadAuthUri = (appId) => {
+safe.loadAuthUri = (appId) => {
   try {
     return window.localStorage.getItem(authUriKey(appId))
   } catch(e) {
-    logApi('loadAuthUri() failed to load from browser storage:' + e.message)
+    todoLogApi('loadAuthUri() failed to load from browser storage:' + e.message)
   }
 }
 
-Safe.clearAuthUri = (appId) => {
+safe.clearAuthUri = (appId) => {
   try {
     window.localStorage.removeItem(authUriKey(appId))
   } catch(e) {
-    logApi('clearAuthUri() failed to clear browser storage:' + e.message)
+    todoLogApi('clearAuthUri() failed to clear browser storage:' + e.message)
   }
 }
 
@@ -174,15 +207,15 @@ Safe.clearAuthUri = (appId) => {
  * Request permissions on a shared MD, return SAFE auth URI
  *
  * @param  {SAFEApp}  app
- * @param  {String}   authReqUri obtained from Safe.genShardMDataUri()
+ * @param  {String}   authReqUri obtained from safe.genShardMDataUri()
  * @return {Promise}  authUri
  */
-Safe.fromUri = async (app, authReqUri) => {
-  logApi('fromUri(app, %s)', authReqUri)
+safe.fromUri = async (app, authReqUri) => {
+  todoLogApi('fromUri(app, %s)', authReqUri)
 
-	let safeAuthUri = await Safe.authorise(authReqUri)
+	let safeAuthUri = await safe.authorise(authReqUri)
   await app.auth.loginFromUri(safeAuthUri)
   return safeAuthUri
 }
 
-module.exports = Safe
+module.exports = safe
