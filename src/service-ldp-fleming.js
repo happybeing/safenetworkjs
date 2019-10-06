@@ -16,12 +16,12 @@ const debug = console.log //require('debug')('safenetworkjs:api')
 const error = console.log //require('debug')('safenetworkjs:error')
 
 const logApi = console.log //require('debug')('safenetworkjs:web')  // Web API
-logLdp = (msg) => {
+const todoLogApi = (msg) => {
   throw Error('TODO: migrate to Fleming APIs (log msg: ' + msg + ')')
 }
 
 const logLdp = console.log //require('debug')('safenetworkjs:ldp')  // LDP service
-const todoLogLdp = logLdp
+const todoLogLdp = todoLogApi
 
 const logRest = console.log //require('debug')('safenetworkjs:rest')  // REST request/response
 const logTest = console.log //require('debug')('safenetworkjs:test')  // Test output
@@ -541,12 +541,9 @@ class SafeServiceLDPFleming extends ServiceInterface {
   // TODO add support for data browser node-solid-server/lib/handlers/get.js
   async _getFile (docUri, options) {
     logLdp('%s._getFile(%s,%O)', this.constructor.name, docUri, options)
+    let docPath = this.safeJs.nfsPathPart(docUri)
     let fileInfo = {}
     let retResponse
-
-// ******** NEXT ********
-// TODO: _getFolder() add mime type based on FilesContainer file metadata?
-// BUG: folders end up with multiple size values (multiple tripes?) - one per subfile entry
 
     try {
       if (!this.safeJs.isConnected()) {
@@ -580,14 +577,13 @@ class SafeServiceLDPFleming extends ServiceInterface {
         return new Response(null, {status: 404, statusText: 'File not found'})
       }
 
-      //??? fileInfo = await this._makeFileInfo(nfsFile, fileInfo, docPath)
-
-      var etagWithoutQuotes = 'safe://' + safe_data.PublishedImmutableData.xorname // ???was fileInfo.ETag
+      var etagWithoutQuotes = safe_data.PublishedImmutableData.resolved_from.xorurl
       // Request is for changed file, so if eTag matches return "304 Not Modified"
       if (options && options.ifNoneMatch && etagWithoutQuotes && (etagWithoutQuotes === options.ifNoneMatch)) {
         return new Response(null, {status: 304, statusText: 'Not Modified'})
       }
 
+      // TODO: _getFolder() could add type (or mime type) based on FilesContainer file metadata
       var contentType = mime.lookup(docPath) || this.DEFAULT_CONTENT_TYPE
       if (safeUtils.hasSuffix(docPath, this.turtleExtensions)) {
         contentType = 'text/turtle'
@@ -946,8 +942,7 @@ class SafeServiceLDPFleming extends ServiceInterface {
       }
       if (docPath === '/') {
         let decoder = new TextDecoder()
-        // folderInfo.ETag = decoder.decode(Uint8Array.from(filesContainer.xorname)) //TODO: decode properly to xor address
-        folderInfo.ETag = 'safe://' + String.fromCharCode.apply(null, filesContainer.xorname)
+        folderInfo.ETag = filesContainer.resolved_from.xorurl
         folderInfo.containerVersion = filesContainer.version.toString()
         logLdp('returning folderInfo: %O', folderInfo)
         return folderInfo
@@ -955,7 +950,7 @@ class SafeServiceLDPFleming extends ServiceInterface {
 
       if (isSafeFolder(docPath)) {
         // TODO Could use _getFolder() in order to generate Solid metadata
-        folderInfo.ETag = fileMapEntry.link
+        folderInfo.ETag = filesContainer.resolved_from.xorurl
         folderInfo.containerVersion = filesContainer.version.toString()
         logLdp('returning folderInfo: %O', folderInfo)
         return folderInfo
