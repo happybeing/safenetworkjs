@@ -9,7 +9,7 @@ const isFolder = function (itemPath, separator) {
   return (itemPath.slice(-1) === separator)
 }
 
-const isNfsFolder = function (itemPath) {
+const isSafeFolder = function (itemPath) {
   return itemPath.slice(-1) === '/'
 }
 
@@ -210,7 +210,7 @@ module.exports.path = path
  * Local helpers
  */
 module.exports.isFolder = isFolder
-module.exports.isNfsFolder = isNfsFolder
+module.exports.isSafeFolder = isSafeFolder
 module.exports.docpart = docpart
 module.exports.itemPathPart = itemPathPart
 module.exports.hostpart = hostpart

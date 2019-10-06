@@ -164,9 +164,9 @@ class SafeContainer {
   constructor (safeJs, containerName, containerPath, subTree, parent, parentEntryKey, tagType) {
     this._safeJs = safeJs       // SafenetworkJs instance
     this._name = containerName
-    this._containerPath = containerPath + (u.isNfsFolder(containerPath) ? '' : '/')
+    this._containerPath = containerPath + (u.isSafeFolder(containerPath) ? '' : '/')
     if (!subTree) subTree = ''
-    this._subTree = subTree + (subTree.length && !u.isNfsFolder(subTree) ? '/' : '')
+    this._subTree = subTree + (subTree.length && !u.isSafeFolder(subTree) ? '/' : '')
     this._parent = parent
     this._parentEntryKey = parentEntryKey
     this._tagType = tagType
@@ -669,7 +669,7 @@ class SafeContainer {
       let folderMatch = this._subTree + folderPath
 
       // For matching we ignore a trailing '/' so remove if present
-      folderMatch = (u.isNfsFolder(folderMatch) ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
+      folderMatch = (u.isSafeFolder(folderMatch) ? folderMatch.substring(0, folderMatch.length - 1) : folderMatch)
 
       let listingQ = []
       let entries = await this._mData.getEntries()
@@ -681,7 +681,7 @@ class SafeContainer {
             let plainKey = decodedEntry.plainKey
 
           // For matching we ignore a trailing '/' so remove if present
-            let matchKey = (u.isNfsFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+            let matchKey = (u.isSafeFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
             debugEntry('Match Key      : ', matchKey)
             debugEntry('Folder Match   : ', folderMatch)
             // Ignore metadata entries
@@ -765,7 +765,7 @@ class SafeContainer {
       // such as 'index.html' or 'images/profile-picture.png'
 
       // For matching we ignore a trailing '/' so remove if present
-      let itemMatch = (u.isNfsFolder(itemPath) ? itemPath.substring(0, itemPath.length - 1) : itemPath)
+      let itemMatch = (u.isSafeFolder(itemPath) ? itemPath.substring(0, itemPath.length - 1) : itemPath)
 
       // We add this._subTree to the front of the path
       itemMatch = this._subTree + itemMatch
@@ -793,7 +793,7 @@ class SafeContainer {
               //   debugEntry('Key (encrypted): ', entry.key.toString())
 
               // For matching we ignore a trailing '/' so remove if present
-              let matchKey = (u.isNfsFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
+              let matchKey = (u.isSafeFolder(plainKey) ? plainKey.substring(0, plainKey.length - 1) : plainKey)
               debugEntry('Key            : ', plainKey)
               debugEntry('Match Key      : ', matchKey)
 
@@ -884,7 +884,7 @@ class SafeContainer {
         type = containerTypeCodes.defaultContainer
       } else {
         // Check for fakeContainer or NFS container
-        let itemAsFolder = (u.isNfsFolder(itemPath) ? itemPath : itemPath + '/')
+        let itemAsFolder = (u.isSafeFolder(itemPath) ? itemPath : itemPath + '/')
         let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
         if (shortestEnclosingKey) {
           if (shortestEnclosingKey.length !== itemPath.length) {
@@ -1986,7 +1986,7 @@ class NfsContainer extends SafeContainer {
           type = containerTypeCodes.defaultContainer
         } else {
           // Check for fakeContainer or NFS container
-          let itemAsFolder = (u.isNfsFolder(itemPath) ? itemPath : itemPath + '/')
+          let itemAsFolder = (u.isSafeFolder(itemPath) ? itemPath : itemPath + '/')
           let shortestEnclosingKey = await this._getShortestEnclosingKey(itemAsFolder)
           if (shortestEnclosingKey) {
             type = containerTypeCodes.fakeContainer
